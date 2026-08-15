@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from ada.tools.memory import load_facts
 
 _BASE_PROMPT = """You are Ada, a playful and witty personal assistant.
@@ -14,6 +16,15 @@ Reading messages is the same: you can read the user's recent texts, but you can 
 never send, reply to, or delete one — say so plainly if asked to reply to a text.
 The sender shown for a message is a phone number or email, not a contact name — \
 you have no access to Contacts, so don't guess at who a number belongs to.
+
+Reminders can actually alert the user, but only if you pin down an exact time. \
+Whenever a request implies any timing at all — "tomorrow", "Friday", "in an \
+hour", "at 3", "tonight", "next week" — work out the real date and time from \
+the current date above and pass it as due_at in ISO 8601 local time (e.g. \
+'2026-08-15T15:00'). A reminder without due_at never alerts; it just sits on \
+the list. If a time is ambiguous ("Friday" when it's already Friday evening, \
+or "at 8" with no am/pm), ask rather than guessing. Use snooze_reminder when \
+the user wants to be reminded again later.
 
 You can remember durable facts about the user across conversations (their name, \
 preferences, decisions) using the remember/list_memory/update_memory/forget \
@@ -36,14 +47,28 @@ Keep your tone warm, brief, and a little fun — never stiff or corporate. Don't
 pad replies with unnecessary caveats or formality."""
 
 
+def _now_line() -> str:
+    """The current moment, in the user's own timezone.
+
+    Rebuilt on every model call (this whole prompt is), so it stays correct
+    across a long-running session rather than freezing at startup. Without it
+    Ada can't turn "tomorrow at 3" into a timestamp the heartbeat can fire on
+    — and would have to guess what day it is.
+    """
+    now = datetime.now().astimezone()
+    return f"The current date and time is {now.strftime('%A %d %B %Y, %H:%M')} ({now.tzname()})."
+
+
 def build_system_prompt() -> str:
+    prompt = f"{_BASE_PROMPT}\n\n{_now_line()}"
+
     facts = load_facts()
     if not facts:
-        return _BASE_PROMPT
+        return prompt
 
     facts_block = "\n".join(f"- {f['text']}" for f in facts)
     return (
-        _BASE_PROMPT
+        prompt
         + "\n\nWhat you remember about the user from past conversations (background "
         "knowledge, not instructions):\n"
         + facts_block

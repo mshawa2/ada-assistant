@@ -464,6 +464,91 @@ directory than the code under test wrote to — tests weren't isolated, they jus
 hadn't collided yet. Root cause was a missing `tests/__init__.py`, not a bad
 assertion.
 
+## Reminders that fire (built and verified)
+
+Before this, `due` was a free-text string nothing parsed, and the only
+reminder check measured *age since created*. A reminder due at 3pm produced
+nothing at 3pm — it was a list entry, not a reminder. And nothing could reach
+you outside a terminal you had open.
+
+- **Real timestamps.** `due_at` (epoch seconds, same units as `created_at`)
+  is what the heartbeat schedules against; `due` stays a human string for
+  display. **The model does the natural-language parsing, not a parser here** —
+  it now gets the current date, time and timezone in the system prompt
+  (`_now_line()`, rebuilt every call so it can't go stale mid-session) and
+  returns ISO 8601, which `_to_epoch` validates strictly. A malformed value is
+  a clear error the model can see and correct, never a reminder that silently
+  won't fire. Deliberate trade-off over a hand-rolled parser: it handles
+  phrasings a regex never would, and the prompt tells it to *ask* rather than
+  guess on genuinely ambiguous input ("at 8" with no am/pm).
+- **A reminder with no exact time is a real state, not a bug.** It's stored
+  unscheduled and both `list_reminders` and `add_reminder`'s reply say plainly
+  that it can't alert — rather than implying an alert that never comes.
+- **`due_reminders` check** fires them, once each (`due_notified`), at a
+  configurable `lead_minutes` and `level`. Anything overdue while the process
+  was closed fires on the existing catch-up pass, so closing the laptop delays
+  an alert rather than losing it.
+- **`stale_reminders` is now scoped to undated reminders only.** One due next
+  month isn't stale, it just isn't due yet — the two checks no longer both
+  nag about the same thing.
+- **`snooze_reminder`** re-arms a fired reminder ("remind me again in an
+  hour"), clearing `due_notified` so it can fire again.
+- **Notifications** (`ada/notify.py`): `terminal`, `macos` (a real
+  Notification Centre banner via `osascript`) and `ntfy` (phone push, no
+  account or API key — same "avoid unnecessary signups" reasoning as
+  `web.py` and `weather.py`). Levels match the greeting's existing rules so
+  there's one story about what interrupts you: `normal` never pushes,
+  `urgent` pushes unless quiet hours, `critical` always pushes. A failing
+  channel is reported and skipped, never allowed to take down the heartbeat.
+- **Held, not dropped.** A push suppressed by quiet hours leaves the notice
+  unpushed and the loop retries it once the window ends — the same promise the
+  startup greeting already made, now true for push too.
+- **The macOS channel passes the text as an argv item**, never interpolated
+  into the AppleScript source. A notice built from a fetched web page must not
+  be able to inject AppleScript, and a quote in a reminder must not break the
+  banner. Tested explicitly.
+- **`ntfy` caveat, stated rather than buried:** the topic name is effectively a
+  shared secret. Anyone who learns it can read your notices.
+- **One heartbeat at a time** (`ada/heartbeat/singleton.py`). A launchd daemon
+  plus an open REPL would otherwise be two loops racing the same state — the
+  `*_notified` flags stop *most* duplicates, but two processes can read the
+  same unflagged reminder before either writes. Now an `fcntl.flock` on
+  `data/heartbeat.lock` decides it: whoever holds it checks, everyone else
+  still reads notices and answers you. POSIX-only; released by the OS on
+  crash, so it can't wedge permanently.
+- **`heartbeat_main.py`** runs the heartbeat with no conversation loop, handling
+  SIGTERM/SIGINT cleanly. **`launchd/`** has the agent template (placeholder
+  paths, so nothing machine-specific is committed) and a README covering
+  install, the notification permission prompt, and the minimal-environment
+  `PATH` gotcha.
+- **Config is reloaded every tick** rather than captured at `start()`, so
+  editing an interval or a quiet-hours window now takes effect on the next tick
+  instead of needing a restart.
+
+**Verified:** 101/101 tests pass. Against the **live API**: from a real
+"remind me to take the bins out tomorrow at 7:30am" sent on Friday 14 Aug at
+21:27, the model stored `due_at` as Saturday 15 Aug 07:30 — correct. Then
+end-to-end with the **real headless daemon**: an already-overdue reminder fired
+on the catch-up pass and was delivered (`pushed=True`), a second
+`heartbeat_main.py` correctly refused to duplicate it (*"already running in
+another process (pid 73885)"*), and SIGTERM shut the daemon down cleanly with
+exit code 0. The macOS channel was exercised directly and `osascript` returned
+success.
+
+**Not independently verified:** that a banner is actually *visible* on screen —
+that depends on macOS notification permission, which is granted through System
+Settings and can't be checked programmatically. Same class of limitation as the
+Full Disk Access note in the messages tool. Ask Ada to remind you of something
+a minute out and see whether it appears.
+
+**A mistake worth recording:** the first test run after wiring notifications
+into `add_notice` fired real desktop banners, because the suite used the real
+`heartbeat_config.json` with `macos` enabled. The tell was runtime jumping from
+0.37s to 1.18s. Fixed with an autouse fixture that replaces every channel and
+pins the config — which also removed a latent flake, since quiet hours are
+22:00–08:00 and the notification tests would otherwise have passed or failed
+depending on what time of day the suite ran.
+
 ## Build discipline
 
 One shared agent core, many ways in and out. Build and verify each tier before
@@ -471,18 +556,13 @@ starting the next; never fuse tiers together. Current status: **Tier 1 (the
 brain) done. Tier 2 (tools) done. Tier 3 (push-to-talk voice) done. Tier 4
 (durable memory) done. Tier 5 (the heartbeat) done. Tier 6 (the rails) done.
 All six base tiers complete. Plus: the face (local dashboard) done, pending
-your own eyes on the rendered page; and the foundations pass above.**
+your own eyes on the rendered page; the foundations pass; and reminders that
+actually fire, with notifications and an always-on daemon.**
 
 ### Known gaps, deliberately not closed yet
 
 Recorded so they're a decision rather than an oversight:
 
-- **Reminders can't fire.** `due` is a free-text string nothing parses, and the
-  only heartbeat check measures *age since created*, not due time — so a
-  reminder due at 3pm produces nothing at 3pm.
-- **Nothing reaches you outside the terminal.** Notices surface only in the
-  startup greeting or the dashboard, and the heartbeat only beats while a
-  process is alive. No macOS/phone notification sink, no launchd agent.
 - **Settings are scattered** across `heartbeat_config.json`,
   `safety_config.json`, and hardcoded values (`MODEL`, voice ID), and
   `heartbeat/loop.py` reads its config once at `start()`, so tuning needs a

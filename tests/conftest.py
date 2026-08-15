@@ -19,6 +19,18 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-never-used")
 
 import pytest  # noqa: E402
 
+from ada import notify  # noqa: E402
+
+# A window of zero width is never active, so quiet hours are off unless a test
+# asks for them. Without this, notification tests would pass or fail depending
+# on what time of day the suite happened to run.
+_NEVER_QUIET = {"start": "22:00", "end": "22:00"}
+
+TEST_NOTIFY_CONFIG = {
+    "quiet_hours": _NEVER_QUIET,
+    "notifications": {"channels": ["terminal"], "push_levels": ["urgent", "critical"]},
+}
+
 
 @pytest.fixture(autouse=True)
 def clean_data_dir():
@@ -29,6 +41,26 @@ def clean_data_dir():
         else:
             child.unlink()
     yield
+
+
+@pytest.fixture(autouse=True)
+def sent_notifications(monkeypatch):
+    """Record notifications instead of sending them, and pin the config.
+
+    Autouse and unconditional: every channel is replaced, so no test can put a
+    real banner on the developer's screen or a real push on their phone. The
+    level and quiet-hours logic above the channels still runs for real — only
+    the final hop out of the process is swapped.
+    """
+    sent = []
+
+    def record(text, _settings, urgent):
+        sent.append({"text": text, "urgent": urgent})
+        return True
+
+    monkeypatch.setattr(notify, "_CHANNELS", {"terminal": record, "macos": record, "ntfy": record})
+    monkeypatch.setattr(notify, "load_config", lambda: TEST_NOTIFY_CONFIG)
+    return sent
 
 
 class FakeBlock:

@@ -7,7 +7,7 @@ interrupts, quiet hours or not.
 
 import time
 
-from ada import audit, store
+from ada import audit, notify, store
 
 _STORE = store.DATA_DIR / "heartbeat_notices.json"
 _lock = store.lock_for(_STORE)
@@ -40,7 +40,49 @@ def add_notice(check: str, text: str, level: str = "normal") -> dict:
         notices.append(notice)
         _save(notices)
         audit.log("heartbeat_notice", check=check, level=level, text=text)
-        return notice
+
+    # Deliberately outside the lock: a push can go over the network, and
+    # holding the store's lock across an HTTP call would stall every other
+    # reader of this file for as long as ntfy takes to answer.
+    _try_push(notice)
+    return notice
+
+
+def _try_push(notice: dict) -> bool:
+    """Push a notice if it's due one, and record that it's been dealt with.
+
+    Marking 'never pushes' as settled too is what stops `flush_pending_pushes`
+    from reconsidering every normal notice on every single tick forever.
+    Returns whether a push actually went out.
+    """
+    disposition = notify.push_disposition(notice)
+    if disposition == notify.HOLD:
+        return False  # held for quiet hours — retried on a later tick, not dropped
+
+    if disposition == notify.NEVER:
+        _mark_pushed(notice["id"])
+        return False
+
+    if notify.deliver(notice):
+        _mark_pushed(notice["id"])
+        return True
+    return False
+
+
+def _mark_pushed(notice_id: int) -> None:
+    with _lock:
+        notices = _load()
+        for notice in notices:
+            if notice["id"] == notice_id:
+                notice["pushed"] = True
+        _save(notices)
+
+
+def flush_pending_pushes() -> int:
+    """Retry anything held back, e.g. once quiet hours end. Returns how many
+    were sent — the heartbeat calls this every tick."""
+    pending = [n for n in list_notices() if not n.get("pushed")]
+    return sum(1 for notice in pending if _try_push(notice))
 
 
 def list_notices(include_dismissed: bool = False) -> list[dict]:

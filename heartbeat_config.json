@@ -1,7 +1,18 @@
 {
   "tick_seconds": 30,
   "quiet_hours": { "start": "22:00", "end": "08:00" },
+  "notifications": {
+    "channels": ["terminal", "macos"],
+    "push_levels": ["urgent", "critical"],
+    "ntfy_topic": ""
+  },
   "checks": {
+    "due_reminders": {
+      "enabled": true,
+      "interval_seconds": 60,
+      "lead_minutes": 0,
+      "level": "urgent"
+    },
     "stale_reminders": {
       "enabled": true,
       "interval_seconds": 3600,

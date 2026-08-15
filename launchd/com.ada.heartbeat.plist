@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template, not a ready-to-load file: the ABSOLUTE_PATH_TO_ADA placeholders
+  have to be replaced with your real checkout path. Kept that way on purpose
+  so nothing machine-specific gets committed. See README.md in this folder.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ada.heartbeat</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>ABSOLUTE_PATH_TO_ADA/.venv/bin/python</string>
+        <string>ABSOLUTE_PATH_TO_ADA/heartbeat_main.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>ABSOLUTE_PATH_TO_ADA</string>
+
+    <!-- Start at login and restart if it ever exits. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Both of these are gitignored along with the rest of data/. -->
+    <key>StandardOutPath</key>
+    <string>ABSOLUTE_PATH_TO_ADA/data/heartbeat.out</string>
+    <key>StandardErrorPath</key>
+    <string>ABSOLUTE_PATH_TO_ADA/data/heartbeat.err</string>
+
+    <!--
+      launchd agents get a minimal environment, so PATH has to be spelled out
+      for the macos notification channel to find osascript.
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

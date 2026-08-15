@@ -9,6 +9,7 @@ what guarantees a slow check can never overlap with itself or pile up runs.
 import threading
 import time
 
+from ada.heartbeat import notices, singleton
 from ada.heartbeat.checks import CHECKS
 from ada.heartbeat.config import load_config
 from ada.heartbeat.kill_switch import is_paused
@@ -34,21 +35,48 @@ def _run_due_checks(config: dict) -> None:
         if now >= next_due_at:
             _run_check(name, CHECKS[name], params)
 
+    # Anything held back by quiet hours gets retried here, so a notice
+    # suppressed at 3am goes out when the window ends rather than waiting for
+    # the next time you happen to start a session.
+    try:
+        notices.flush_pending_pushes()
+    except Exception as e:
+        print(f"\n[heartbeat: couldn't flush held notifications: {e}]", flush=True)
+
 
 def start(stop_event: threading.Event) -> threading.Thread:
-    config = load_config()
+    if not singleton.acquire():
+        owner = singleton.owner_pid()
+        print(
+            f"[heartbeat: already running in another process{f' (pid {owner})' if owner else ''}"
+            " — this one won't duplicate its checks]",
+            flush=True,
+        )
+        return _idle_thread(stop_event)
 
     # Run one catch-up pass synchronously before handing off to the background
     # thread, so anything overdue is already in the notice log by the time the
     # caller builds its startup greeting — no race with the first tick.
-    _run_due_checks(config)
+    _run_due_checks(load_config())
 
     def loop() -> None:
         while not stop_event.is_set():
+            # Reloaded each tick rather than captured once at startup: editing
+            # an interval or a quiet-hours window in heartbeat_config.json now
+            # takes effect on the next tick instead of needing a restart.
+            config = load_config()
             stop_event.wait(config.get("tick_seconds", 30))
             if not stop_event.is_set():
                 _run_due_checks(config)
 
     thread = threading.Thread(target=loop, daemon=True)
+    thread.start()
+    return thread
+
+
+def _idle_thread(stop_event: threading.Event) -> threading.Thread:
+    """A thread that does nothing but honour stop_event, so callers can treat
+    'someone else owns the heartbeat' exactly like owning it themselves."""
+    thread = threading.Thread(target=stop_event.wait, daemon=True)
     thread.start()
     return thread
