@@ -2,7 +2,7 @@ from collections.abc import Iterator
 
 import anthropic
 
-from ada import audit, cost, settings
+from ada import audit, budget, cost, settings
 from ada.config import ANTHROPIC_API_KEY
 from ada.system_prompt import build_system_prompt
 
@@ -29,6 +29,15 @@ def stream_turn(messages: list[dict], tools: list[dict]) -> Iterator[str]:
     StopIteration.value) the final Message, which the caller inspects for
     tool_use blocks and stop_reason.
     """
+    # Checked before the call, not after: discovering you're over budget once
+    # the money is already spent isn't a limit, it's a receipt. The exact cost
+    # of *this* call isn't knowable until it returns, so this asks the cheaper
+    # question — are we already at the ceiling?
+    try:
+        budget.check(budget.MODEL)
+    except budget.BudgetExceeded as e:
+        raise LLMError(str(e)) from e
+
     try:
         with _client.messages.stream(
             model=settings.get("model.conversation", DEFAULT_MODEL),

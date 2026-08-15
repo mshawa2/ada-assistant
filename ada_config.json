@@ -15,7 +15,16 @@
 
   "model": {
     "conversation": "claude-sonnet-5",
-    "max_tokens": 4096
+    "max_tokens": 4096,
+    "pricing": { "input_per_mtok": 2.0, "output_per_mtok": 10.0 }
+  },
+
+  "budget": {
+    "currency": "USD",
+    "limits": {
+      "model": { "per_day": 5.0, "per_month": 50.0 },
+      "purchases": { "per_day": 0.0, "per_month": 0.0 }
+    }
   },
 
   "autonomy": {

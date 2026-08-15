@@ -15,7 +15,7 @@ an oversight — and it's one word away from being gated if you disagree.
 
 import json
 
-from ada import settings
+from ada import budget, settings
 from ada.tools.registry import tool
 
 # Changing these through conversation would be a foot-gun: the model would be
@@ -53,6 +53,20 @@ def get_settings(section: str = "") -> str:
             raise ValueError(f"No settings section called '{section}'. Try one of: {', '.join(config)}.")
         config = {section: config[section]}
     return json.dumps(config, indent=2)
+
+
+@tool(
+    name="get_spending",
+    description=(
+        "Show what the user has spent against their limits — how much running you has "
+        "cost so far today and this month, and how much headroom is left. Use this when "
+        "they ask what you're costing them, or when a spending limit has stopped you "
+        "doing something."
+    ),
+    input_schema={"type": "object", "properties": {}, "required": []},
+)
+def get_spending() -> str:
+    return budget.summary()
 
 
 @tool(

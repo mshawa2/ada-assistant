@@ -868,6 +868,56 @@ reachable (`imap.gmail.com:993` handshakes and greets in 0.35s), but the actual
 fetch/parse path against real mail is untested until an app password exists —
 the same honest gap as Brave/Tavily.
 
+## Spend limits (built and verified)
+
+`ada/limits.py` caps how *often* something runs. That's the right protection
+against a loop and no protection at all against one expensive thing, or a
+hundred cheap ones that quietly add up. `ada/budget.py` is the money version,
+and it covers two categories that differ in kind.
+
+**`model` is real and was already spending.** Every turn costs tokens and
+`cost.py` has always priced them — but the tally lived in memory and died with
+the process, so "how much has Ada cost me this month" had no answer and nothing
+stopped a bad week. It's now persisted to `data/spend.json` and **checked
+before each call, not after**: discovering you're over budget once the money is
+gone isn't a limit, it's a receipt. Default caps are $5/day, $50/month.
+
+**`purchases` defaults to zero, and no purchasing tool exists.** That's the
+point — the rail lands before the capability, so the day something can spend
+your money it is denied by default until you deliberately raise the limit. Any
+future purchasing tool calls `check()` before acting and `record()` after, the
+same shape `send_message` uses for rate limits.
+
+- **Pricing moved out of the code** into `model.pricing`, so correcting a rate
+  or switching to a differently-priced model is a config edit. Token counts
+  stay exact; only the dollar figure is an estimate, and it says so.
+- **`get_spending`** lets the user just ask, and gives Ada something concrete
+  to say when a limit stops her.
+- **Amounts stay at full float precision.** Model costs are fractions of a
+  cent, so rounding to pennies would erase the entire tally. This is a cap, not
+  double-entry bookkeeping — noted in the module, along with what it'd take to
+  make it a real ledger.
+- **A `null` cap disables a window.** Settings merge additively, so an empty
+  block can't remove an inherited default; null is the documented way off, and
+  both `check` and `summary` honour it.
+
+**Verified:** 275/275 tests pass. Live: a normal turn recorded $0.0176 and
+reported $4.98 left; after topping the ledger up to the cap, the next turn
+raised *"Spending limit reached for 'model': $5.02 used this day and the limit
+is $5.00 per day"* **before reaching the API** — no spend to find out. A
+one-cent purchase was refused with no purchasing tool in existence.
+
+**Two bugs the tests caught, both real:**
+
+1. **Landing exactly on the cap didn't block.** `already + amount > cap` with
+   the amount unknown (0.0) meant $5.00 of a $5.00 cap read as under, letting
+   that call through and every one after it. The two questions are genuinely
+   different — "would this specific spend cross the line" is `>`, "am I already
+   at it" is `>=` — and the model case is always the second, because a call's
+   cost isn't knowable until it returns.
+2. **`summary()` printed disabled windows.** `check()` already skipped a `null`
+   cap; the summary didn't, so a turned-off limit still showed as a limit.
+
 ## Build discipline
 
 One shared agent core, many ways in and out. Build and verify each tier before
@@ -886,9 +936,8 @@ read-only email triage.**
 Recorded so they're a decision rather than an oversight:
 
 - **Session trimming drops the old prefix rather than summarizing it.**
-- **No spend limits.** `ada/limits.py` now does rate limits (per minute/hour/
-  day), but there's no "never more than £X", which a real purchasing tool would
-  want on top of `confirm`.
+- **No purchasing tool.** The spend rail exists and defaults to zero, so one
+  can be added safely — but nothing spends money except the model itself.
 - **Sending is iMessage only.** Email is read-only — no send, no reply, no
   archive, no mark-read. That's the deliberate next step, not an oversight.
 - **Contacts is read-only and search-only** — Ada can't add or edit a contact,

@@ -66,6 +66,22 @@ DEFAULTS: dict[str, Any] = {
     "model": {
         "conversation": "claude-sonnet-5",
         "max_tokens": 4096,
+        # Per million tokens. Here rather than hardcoded so a price change is
+        # a config edit; the token counts are exact either way.
+        "pricing": {"input_per_mtok": 2.00, "output_per_mtok": 10.00},
+    },
+    "budget": {
+        "currency": "USD",
+        "limits": {
+            # Real money, already being spent. Generous enough not to get in
+            # the way, low enough that a runaway loop can't quietly cost a
+            # fortune. Raise it if you hit it legitimately.
+            "model": {"per_day": 5.00, "per_month": 50.00},
+            # No purchasing tool exists yet, and this is why the rail is here
+            # first: the day one does, it is denied by default until the user
+            # deliberately raises this.
+            "purchases": {"per_day": 0.00, "per_month": 0.00},
+        },
     },
     "autonomy": {
         "default": AUTO,
