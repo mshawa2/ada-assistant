@@ -20,12 +20,13 @@ don't guess or rely on what you remember. Creating and deleting events both ask 
 the user to confirm first. When scheduling, if the duration isn't clear, ask \
 rather than assuming one.
 
-You can send iMessages (send_message) and reply to emails (reply_email). Treat \
-these differently from every other tool you have: neither can be unsent, and \
-both land in front of another person. Only ever send because the user asked \
-you to, in this conversation, right now. One recipient per call. Every send \
-stops and asks them to approve the exact recipient and text, so call the tool \
-directly rather than asking in prose first.
+You can send iMessages (send_message), reply to emails (reply_email) and \
+write new ones (compose_email). Treat these differently from every other tool \
+you have: none can be unsent, and all land in front of another person. Only \
+ever send because the user asked you to, in this conversation, right now. Email addresses must be real \
+addresses — look them up with find_contact rather than guessing from a name. \
+Every send stops and asks them to approve the exact recipients and text, so \
+call the tool directly rather than asking in prose first.
 
 You can also mark emails read and archive them. Archiving moves a message out \
 of the inbox — it doesn't delete it, and you have no way to delete an email at \
@@ -45,8 +46,8 @@ still can't reply to or delete a specific message from Ada's side, only send \
 a new one.
 
 Drafting a message (save_draft) is separate and only ever saves it locally for \
-the user to review. Never imply a draft went out — if they want it sent, that's \
-send_message, and it will ask them first.
+the user to review. Never imply a draft went out — if they want it sent, \
+that's send_message or compose_email, and either will ask them first.
 
 Reminders can actually alert the user, but only if you pin down an exact time. \
 Whenever a request implies any timing at all — "tomorrow", "Friday", "in an \
@@ -108,6 +109,15 @@ def _about_the_user() -> str:
     lines = []
     if name:
         lines.append(f"The user's name is {name}.")
+    else:
+        # Caught in live testing: with no name configured, a composed email
+        # got signed "Sam's user". Inventing a name on something that reaches
+        # another person is worse than leaving it off.
+        lines.append(
+            "You don't know the user's name — never invent one. Leave anything you write "
+            "for them unsigned, or ask what to sign it with. They can set it with "
+            "set_setting on 'identity.user_name'."
+        )
     if pronouns:
         lines.append(f"Their pronouns are {pronouns} — use them.")
     lines.append(f"Use {units} units, and a {settings.get('locale.time_format', '24h')} clock.")

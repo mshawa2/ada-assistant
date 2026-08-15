@@ -40,11 +40,13 @@
       "mark_email_read": "confirm",
       "archive_email": "confirm",
       "reply_email": "confirm",
+      "compose_email": "confirm",
       "run_shortcut": "confirm"
     },
     "limits": {
       "send_message": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
       "reply_email": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
+      "compose_email": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
       "web_search": { "per_minute": 10, "per_day": 300 },
       "list_email": { "per_minute": 10 },
       "search_email": { "per_minute": 10 },

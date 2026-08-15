@@ -173,6 +173,7 @@ def test_there_is_still_no_delete_tool():
         "mark_email_read",
         "archive_email",
         "reply_email",
+        "compose_email",
     }
     assert not [n for n in names if "email" in n and "delete" in n]
 
@@ -182,7 +183,7 @@ def test_every_email_mutation_is_gated():
     gated in DEFAULTS too, so a missing config can't ungate a send."""
     from ada import safety
 
-    for name in ("mark_email_read", "archive_email", "reply_email"):
+    for name in ("mark_email_read", "archive_email", "reply_email", "compose_email"):
         assert safety.requires_confirmation(name), name
         assert settings.DEFAULTS["autonomy"]["tools"][name] == settings.CONFIRM, name
 
@@ -616,3 +617,140 @@ def test_a_rejected_smtp_login_explains_the_app_password(monkeypatch, mailbox):
 
     with pytest.raises(email_tool.EmailUnavailable, match="App Password"):
         email_tool.reply_email("62", "hi")
+
+
+# --- composing a new email --------------------------------------------------
+
+
+def test_composing_sends_to_the_given_address(mailbox, smtp):
+    result = email_tool.compose_email(["sam@example.com"], "Lunch", "Thursday?")
+
+    sent = smtp[0].sent[0]
+    assert sent["To"] == "sam@example.com"
+    assert sent["Subject"] == "Lunch"
+    assert "Thursday?" in sent.get_content()
+    assert "sam@example.com" in result
+
+
+def test_composing_allows_several_recipients(mailbox, smtp):
+    """Emailing three people is ordinary; texting three people is a group
+    chat. Different thing, different rule from send_message."""
+    email_tool.compose_email(["a@example.com", "b@example.com"], "Plan", "Details.")
+
+    assert smtp[0].sent[0]["To"] == "a@example.com, b@example.com"
+
+
+def test_cc_is_carried_and_reported(mailbox, smtp):
+    result = email_tool.compose_email(["a@example.com"], "Plan", "Details.", cc=["b@example.com"])
+
+    assert smtp[0].sent[0]["Cc"] == "b@example.com"
+    assert "b@example.com" in result
+
+
+def test_a_comma_separated_recipient_string_is_accepted(mailbox, smtp):
+    email_tool.compose_email("a@example.com, b@example.com", "Plan", "Details.")
+
+    assert smtp[0].sent[0]["To"] == "a@example.com, b@example.com"
+
+
+@pytest.mark.parametrize("bad", ["Sam", "sam", "the team", "sam@", "@example.com", "sam example.com"])
+def test_a_name_is_refused_rather_than_guessed_at(mailbox, smtp, bad):
+    """No address means no send — guessing one emails a stranger."""
+    with pytest.raises(ValueError, match="aren't email addresses"):
+        email_tool.compose_email([bad], "Hi", "Hello")
+
+    assert smtp == []
+
+
+def test_the_refusal_points_at_find_contact(mailbox, smtp):
+    with pytest.raises(ValueError, match="find_contact"):
+        email_tool.compose_email(["Sam"], "Hi", "Hello")
+
+
+def test_no_recipient_is_refused(mailbox, smtp):
+    with pytest.raises(ValueError, match="No recipient"):
+        email_tool.compose_email([], "Hi", "Hello")
+
+    assert smtp == []
+
+
+def test_a_mass_mailing_is_capped(mailbox, smtp):
+    """A cap is what stops an accidental blast; the confirmation lists them
+    all so it's never 'send to some people'."""
+    many = [f"p{i}@example.com" for i in range(email_tool.MAX_RECIPIENTS + 1)]
+
+    with pytest.raises(ValueError, match="the limit is"):
+        email_tool.compose_email(many, "Hi", "Hello")
+
+    assert smtp == []
+
+
+def test_an_empty_subject_is_refused(mailbox, smtp):
+    with pytest.raises(ValueError, match="no subject"):
+        email_tool.compose_email(["a@example.com"], "   ", "Hello")
+
+    assert smtp == []
+
+
+def test_an_empty_body_is_refused(mailbox, smtp):
+    with pytest.raises(ValueError, match="empty email"):
+        email_tool.compose_email(["a@example.com"], "Hi", "   ")
+
+    assert smtp == []
+
+
+def test_an_absurdly_long_body_is_refused(mailbox, smtp):
+    with pytest.raises(ValueError, match="the limit is"):
+        email_tool.compose_email(["a@example.com"], "Hi", "x" * (email_tool.MAX_BODY_SEND_CHARS + 1))
+
+    assert smtp == []
+
+
+def test_the_compose_confirmation_lists_every_recipient():
+    """The user should never approve 'send to some people'."""
+    from ada import agent
+
+    description = agent._describe_action(
+        "compose_email",
+        {
+            "to": ["a@example.com", "b@example.com"],
+            "cc": ["c@example.com"],
+            "subject": "Plan",
+            "body": "The details.",
+        },
+    )
+
+    assert "SEND A NEW EMAIL" in description
+    assert "cannot be unsent" in description
+    for address in ("a@example.com", "b@example.com", "c@example.com"):
+        assert address in description
+    assert "Plan" in description and "The details." in description
+
+
+def test_composing_is_gated_and_rate_limited():
+    from ada import safety
+
+    assert safety.requires_confirmation("compose_email")
+    assert settings.DEFAULTS["autonomy"]["tools"]["compose_email"] == settings.CONFIRM
+    assert settings.get("autonomy.limits.compose_email.per_hour")
+
+
+def test_composing_without_setup_explains_it(monkeypatch, smtp):
+    monkeypatch.delenv(email_tool.PASSWORD_KEY_NAME, raising=False)
+
+    with pytest.raises(email_tool.EmailUnavailable, match="isn't set up yet"):
+        email_tool.compose_email(["a@example.com"], "Hi", "Hello")
+
+    assert smtp == []
+
+
+def test_reply_and_compose_share_one_sending_path(mailbox, smtp):
+    """Two copies of TLS negotiation is two places for the send path to
+    quietly diverge — and this is where being wrong is least recoverable."""
+    mailbox[70] = _message("sam@example.com", "Lunch?")
+
+    email_tool.reply_email("70", "yes")
+    email_tool.compose_email(["new@example.com"], "Hi", "Hello")
+
+    assert len(smtp) == 2
+    assert all(s.logged_in == ("user@example.com", "synthetic-app-password") for s in smtp)

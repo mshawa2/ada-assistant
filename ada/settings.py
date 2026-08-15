@@ -100,6 +100,7 @@ DEFAULTS: dict[str, Any] = {
             "archive_email": CONFIRM,
             "reply_email": CONFIRM,
             "run_shortcut": CONFIRM,
+            "compose_email": CONFIRM,
         },
         # A ceiling on top of confirmation. `confirm` protects against one
         # wrong action; it does nothing about thirty, because the human in the
@@ -117,6 +118,7 @@ DEFAULTS: dict[str, Any] = {
             "read_email": {"per_minute": 20},
             # A reply is a send: same class as send_message, same ceiling.
             "reply_email": {"per_minute": 3, "per_hour": 10, "per_day": 30},
+            "compose_email": {"per_minute": 3, "per_hour": 10, "per_day": 30},
         },
     },
     "home": {
