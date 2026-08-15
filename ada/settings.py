@@ -129,6 +129,11 @@ DEFAULTS: dict[str, Any] = {
         # picks one by name and can never supply a destination itself.
         "vendors": {},
     },
+    "shopping": {
+        # A dedicated Reminders list keeps shopping out of general reminders.
+        # Make one in Reminders.app, or point this at one you already have.
+        "list_name": "Shopping",
+    },
     "home": {
         # Domains that always ask first, whatever autonomy says. Physical
         # security and heating — where being wrong is expensive.

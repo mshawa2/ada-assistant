@@ -15,12 +15,13 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-51 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+52 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
 |---|---|
 | Reminders & tasks | `add_reminder`, `complete_reminder`, `list_reminders`, `snooze_reminder` |
+| Shopping | `shopping_list` ⚠️* |
 | Calendar | `create_event` ⚠️, `delete_event` ⚠️, `find_events`, `list_calendars`, `list_events` |
 | Messages | `find_contact`, `read_recent_messages`, `send_message` ⚠️ |
 | Email | `archive_email` ⚠️, `compose_email` ⚠️, `list_email`, `mark_email_read` ⚠️, `read_email`, `reply_email` ⚠️, `search_email` |
@@ -1176,6 +1177,40 @@ asked what was in it. Given real items, the confirmation showed $25.00 /
 groceries / the items, approving posted exactly one request, and the spend
 landed against the budget. A follow-up $900 request was declined without even
 trying, because the vendor cap was checked first.
+
+## Shopping list (built and verified)
+
+**It lives in Reminders, not in `data/`.** A shopping list is useless where you
+aren't: storing it like notes or memory would put it on the laptop, and the
+moment you actually need it you're in a supermarket holding a phone. macOS
+Reminders syncs there by itself, and EventKit was already a dependency for the
+calendar — reminders are just a separate permission on the same framework.
+
+**It is not `reminders.py`.** That's time-based tasks that fire at a moment
+("call the dentist at 3pm"); this is a standing set of items with no due date,
+ticked off in a shop. Same word, different thing, and merging them would make
+both worse. The tool descriptions say which is which.
+
+- **One tool with an action**, not four. `clear` is the only destructive one,
+  so it's the only one that asks — via `confirm_when`, the same per-call
+  mechanism that tells a lock from a lamp. Adding milk shouldn't need a y/n.
+- **Removing completes rather than deletes.** Ticking off is what a shopping
+  list does, and it stays recoverable in Reminders.
+- **A missing list is never silently swapped for the default.** Scattering
+  shopping items through someone's general reminders is worse than one clear
+  message naming the lists that do exist.
+
+**Verified** against real Reminders: add, duplicate detection ("Already on it:
+ADA TEST milk"), listing, loose-match removal, and an honest "Not on the list:
+caviar" — then cleaned up, with the original list byte-identical afterwards.
+
+**A second bug of the kind only real calls catch.** The predicate selector is
+`predicateForIncompleteReminders**With**DueDateStarting_…`, not `…**In**DueDate…`.
+A fake answers to whatever name the code invents, so all 450 tests passed
+while the real call raised `AttributeError` immediately. Same shape as the
+AppleScript `kind` bug. There's now a test asserting the fake store defines no
+method that `EKEventStore` doesn't have, so the fake can't drift into
+validating an API that isn't there.
 
 ## Consolidation notes
 

@@ -15,6 +15,7 @@ from ada.tools import (  # noqa: F401  imported for tool-registration side effec
     reminders,
     search,
     settings_tool,
+    shopping,
     weather,
     web,
 )
