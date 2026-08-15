@@ -356,3 +356,119 @@ def test_the_confirmation_says_what_will_physically_happen(entity, action, verb)
     description = agent._describe_action("control_home_device", {"entity_id": entity, "action": action})
 
     assert verb in description
+
+
+# --- history ----------------------------------------------------------------
+
+
+def _history_fixture(monkeypatch, series):
+    """Point the HA call at a canned history series."""
+    monkeypatch.setenv(home.URL_KEY_NAME, "http://synthetic.local:8123")
+    monkeypatch.setenv(home.TOKEN_KEY_NAME, "synthetic-token")
+    paths = []
+
+    def fake(path, payload=None):
+        paths.append(path)
+        return [series]
+
+    monkeypatch.setattr(home, "_hass", fake)
+    return paths
+
+
+def _at(hours_ago, state):
+    import time as _t
+
+    return {"state": state, "last_changed": home.datetime.fromtimestamp(
+        _t.time() - hours_ago * 3600, home.timezone.utc).isoformat()}
+
+
+def test_history_reports_how_long_each_state_lasted(monkeypatch):
+    """The raw list of changes isn't the question — 'how long was it on' is."""
+    _history_fixture(monkeypatch, [_at(24, "off"), _at(20, "on"), _at(17, "off")])
+
+    result = home.device_history("climate.hall", hours_back=24)
+
+    assert "climate.hall" in result
+    assert "on for 3h" in result, f"expected a 3h on-period, got: {result}"
+
+
+def test_a_device_that_never_changed_is_still_reported(monkeypatch):
+    """One state change in the window means it's been that way throughout —
+    reporting 'no time on' would be the obvious way to get this wrong."""
+    _history_fixture(monkeypatch, [_at(24, "on")])
+
+    result = home.device_history("light.kitchen", hours_back=24)
+
+    assert "on for" in result
+    assert "been on throughout" in result
+
+
+def test_the_change_timeline_is_shown_with_local_times(monkeypatch):
+    _history_fixture(monkeypatch, [_at(10, "off"), _at(5, "on")])
+
+    result = home.device_history("light.kitchen", hours_back=12)
+
+    assert "Currently on" in result
+    assert "→ on" in result
+
+
+def test_an_empty_history_explains_why(monkeypatch):
+    _history_fixture(monkeypatch, [])
+
+    result = home.device_history("light.kitchen")
+
+    assert "No history" in result
+    assert "recorder" in result
+
+
+def test_the_window_is_clamped(monkeypatch):
+    paths = _history_fixture(monkeypatch, [_at(1, "on")])
+
+    home.device_history("light.kitchen", hours_back=99999)
+    home.device_history("light.kitchen", hours_back=-5)
+
+    assert len(paths) == 2, "both calls should have gone through, just bounded"
+
+
+def test_history_asks_for_only_the_one_entity(monkeypatch):
+    paths = _history_fixture(monkeypatch, [_at(1, "on")])
+
+    home.device_history("light.kitchen")
+
+    assert "filter_entity_id=light.kitchen" in paths[0]
+    assert "minimal_response" in paths[0]
+
+
+def test_a_guessed_entity_id_is_refused_for_history(monkeypatch):
+    _history_fixture(monkeypatch, [])
+
+    with pytest.raises(ValueError, match="isn't an entity id"):
+        home.device_history("the heating")
+
+
+def test_history_without_home_assistant_says_shortcuts_cannot_do_it():
+    with pytest.raises(home.HomeUnavailable, match="can't answer what a device did in the past"):
+        home.device_history("climate.hall")
+
+
+def test_history_is_read_only_and_ungated():
+    from ada.tools import specs
+
+    assert "device_history" in {s["name"] for s in specs()}
+    assert not safety.requires_confirmation("device_history")
+
+
+@pytest.mark.parametrize(
+    "seconds,expected",
+    [(30, "30s"), (90, "1m"), (3600, "1h"), (12000, "3h 20m"), (90000, "1d 1h")],
+)
+def test_durations_read_the_way_a_person_would_say_them(seconds, expected):
+    assert home._duration(seconds) == expected
+
+
+def test_a_malformed_timestamp_is_skipped_not_crashed_on(monkeypatch):
+    _history_fixture(monkeypatch, [{"state": "on", "last_changed": "not-a-date"}, _at(2, "off")])
+
+    result = home.device_history("light.kitchen", hours_back=6)
+
+    assert "off for" in result, "the good entry still counts"

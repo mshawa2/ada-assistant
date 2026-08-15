@@ -22,16 +22,23 @@ touching code.
 
 `run_shortcut` always confirms, because a shortcut is opaque: it could set a
 timer or it could open the garage, and this module has no way to know which.
+
+`device_history` answers the past rather than the present — "was the heating
+on last night" — and needs Home Assistant, since Shortcuts can only do things
+now. It's read-only and ungated.
 """
 
 import json
 import os
 import shutil
 import subprocess
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 
-from ada import settings
+from ada import settings, when
 from ada.tools.registry import tool
 
 _TIMEOUT = 15
@@ -334,3 +341,157 @@ def run_shortcut(name: str, input: str = "") -> str:
 
     output = (result.stdout or "").strip()
     return f"Ran '{name}'." + (f" It returned: {output}" if output else "")
+
+
+# --- history ----------------------------------------------------------------
+#
+# "Was the heating on last night" is a different question from "is it on now",
+# and the raw answer Home Assistant gives — a list of state changes — isn't
+# one a person wants read back to them. What they're actually asking is how
+# long it was on, so that's what gets computed.
+#
+# History needs Home Assistant's `recorder` (on by default, keeping ~10 days).
+# Shortcuts can't answer this at all, so that path says so rather than
+# pretending.
+
+MAX_HISTORY_HOURS = 720  # 30 days — well past what recorder keeps by default
+MAX_CHANGES_SHOWN = 40
+
+
+def _parse_ha_time(value: str) -> float:
+    """One of Home Assistant's ISO timestamps as epoch seconds."""
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return 0.0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _duration(seconds: float) -> str:
+    """A span as something a person would say out loud."""
+    seconds = int(max(0, seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes = rest // 60
+
+    if days:
+        return f"{days}d {hours}h" if hours else f"{days}d"
+    if hours:
+        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+    return f"{minutes}m"
+
+
+def _history(entity_id: str, start: float, end: float) -> list[dict]:
+    query = urllib.parse.urlencode(
+        {
+            "filter_entity_id": entity_id,
+            "end_time": datetime.fromtimestamp(end, timezone.utc).isoformat(),
+            "minimal_response": "",
+        }
+    )
+    path = f"/api/history/period/{datetime.fromtimestamp(start, timezone.utc).isoformat()}?{query}"
+    payload = _hass(path)
+
+    # The API returns a list of series, one per entity; we asked for one.
+    series = payload[0] if isinstance(payload, list) and payload else []
+    entries = []
+    for entry in series:
+        state = entry.get("state")
+        stamp = _parse_ha_time(entry.get("last_changed") or entry.get("last_updated"))
+        if state and stamp:
+            entries.append({"state": state, "at": stamp})
+    entries.sort(key=lambda e: e["at"])
+    return entries
+
+
+def _totals(entries: list[dict], start: float, end: float) -> dict[str, float]:
+    """How long the entity spent in each state across the window.
+
+    Each entry runs until the next one, and the last runs until the end of the
+    window — a device that's been on for three hours and hasn't changed since
+    has exactly one state change in its history, and reporting that as "no
+    time on" would be the obvious way to get this wrong.
+    """
+    totals: dict[str, float] = {}
+    for index, entry in enumerate(entries):
+        began = max(entry["at"], start)
+        finished = entries[index + 1]["at"] if index + 1 < len(entries) else end
+        totals[entry["state"]] = totals.get(entry["state"], 0.0) + max(0.0, finished - began)
+    return totals
+
+
+@tool(
+    name="device_history",
+    description=(
+        "Look at what a smart home device did in the past — when it turned on or off, "
+        "and how long it spent in each state. Use this for questions like 'was the "
+        "heating on last night', 'how long were the kitchen lights on today', or 'did "
+        "anyone unlock the front door while I was out'. Get the entity id from "
+        "list_home_devices first. This only reads history; it changes nothing."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "entity_id": {
+                "type": "string",
+                "description": "The device's id from list_home_devices, e.g. 'climate.hall'.",
+            },
+            "hours_back": {
+                "type": "integer",
+                "description": "How far back to look, in hours. Defaults to 24.",
+            },
+        },
+        "required": ["entity_id"],
+    },
+)
+def device_history(entity_id: str, hours_back: int = 24) -> str:
+    entity_id = (entity_id or "").strip()
+
+    if not _hass_configured():
+        raise HomeUnavailable(
+            "Device history needs Home Assistant — Apple Shortcuts can't answer what a "
+            "device did in the past, only run something now.\n\n" + _SETUP_HELP
+        )
+    if "." not in entity_id:
+        raise ValueError(
+            f"'{entity_id}' isn't an entity id — they look like 'climate.hall'. "
+            "Get the real one from list_home_devices rather than guessing."
+        )
+
+    hours = max(1, min(int(hours_back), MAX_HISTORY_HOURS))
+    end = time.time()
+    start = end - hours * 3600
+
+    entries = _history(entity_id, start, end)
+    if not entries:
+        return (
+            f"No history for {entity_id} in the last {_duration(hours * 3600)}. "
+            "Home Assistant only keeps history for entities its recorder is watching, "
+            "and by default only for about 10 days."
+        )
+
+    totals = _totals(entries, start, end)
+    summary = ", ".join(
+        f"{state} for {_duration(seconds)}"
+        for state, seconds in sorted(totals.items(), key=lambda item: -item[1])
+    )
+
+    lines = [f"{entity_id} over the last {_duration(hours * 3600)}: {summary}."]
+
+    changes = entries[1:]  # the first entry is the state on entering the window
+    if changes:
+        lines.append("")
+        lines.append(f"Currently {entries[-1]['state']}. Changes:")
+        for entry in changes[-MAX_CHANGES_SHOWN:]:
+            lines.append(f"  {when.stamp(entry['at'])} → {entry['state']}")
+        if len(changes) > MAX_CHANGES_SHOWN:
+            lines.append(f"  ({len(changes) - MAX_CHANGES_SHOWN} earlier changes not shown.)")
+    else:
+        lines.append(f"No changes in that window — it's been {entries[0]['state']} throughout.")
+
+    return "\n".join(lines)

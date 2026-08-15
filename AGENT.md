@@ -15,7 +15,7 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-45 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+46 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
@@ -26,7 +26,7 @@ depending on the arguments (a lock, not a lamp). Everything else runs freely.
 | Email | `archive_email` ⚠️, `list_email`, `mark_email_read` ⚠️, `read_email`, `reply_email` ⚠️, `search_email` |
 | Notes & drafts | `delete_note` ⚠️, `list_drafts`, `list_notes`, `read_draft`, `read_note`, `save_draft`, `search_notes` |
 | Web | `fetch_url`, `get_weather`, `web_search` |
-| Home & Mac | `control_home_device` ⚠️*, `list_home_devices`, `media_control`, `run_shortcut` ⚠️, `system_control` |
+| Home & Mac | `control_home_device` ⚠️*, `device_history`, `list_home_devices`, `media_control`, `run_shortcut` ⚠️, `system_control` |
 | Memory | `forget` ⚠️, `list_memory`, `remember`, `update_memory` |
 | Ada herself | `dismiss_notice`, `get_settings`, `get_spending`, `heartbeat`, `list_modes`, `list_notices`, `set_mode`, `set_setting` ⚠️ |
 
@@ -1032,6 +1032,32 @@ are both faked. `smtp.gmail.com` was confirmed to negotiate STARTTLS on 587 and
 SSL on 465 and to reject a bad login with 535, so the transport is right; the
 send path against real mail is untested until an app password exists.
 
+## Smart home history (built and verified)
+
+`device_history` answers the past rather than the present. Home Assistant's
+recorder keeps the raw state changes, but a list of changes isn't the question
+anyone actually asks — "was the heating on last night" wants a *duration*, so
+that's what gets computed and led with.
+
+- **The last entry runs to the end of the window.** A device that's been on
+  for three hours and hasn't changed since has exactly *one* entry in its
+  history; treating that as "no time on" is the obvious way to get this wrong,
+  and it's what the "never changed" test pins down.
+- **The first entry is the state on entering the window**, not a change, so
+  it's excluded from the timeline while still counting towards the totals.
+- Read-only and ungated. Bounded to 30 days (past what recorder keeps by
+  default) and 40 changes shown, with the remainder reported rather than
+  silently dropped. A malformed timestamp is skipped, not fatal.
+- **Shortcuts can't answer this**, and it says so rather than pretending —
+  running something now and knowing what happened earlier are different
+  capabilities.
+
+**Verified:** 360/360 pass. Live through the model against a fake Home
+Assistant, "was the heating on last night?" produced: *"it kicked on at 22:40
+last night and ran till 01:10, so about 2.5 hours of heat overnight. Off since
+then."* — the entity looked up first, then the history queried and turned into
+an answer rather than a data dump.
+
 ## Consolidation notes
 
 The sections above are in **build order**, not importance order — each records
@@ -1081,8 +1107,6 @@ and Mac control; and a consolidation pass.**
 Recorded so they're a decision rather than an oversight:
 
 - **Session trimming drops the old prefix rather than summarizing it.**
-- **No smart-home state history** — Ada can see what a device is doing now,
-  but not what it did earlier, so "was the heating on last night" is out.
 - **Media control is transport only** — play/pause/skip, no picking a track or
   playlist, and Apple Music only.
 - **No purchasing tool.** The spend rail exists and defaults to zero, so one
