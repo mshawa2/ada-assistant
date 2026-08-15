@@ -41,17 +41,23 @@
       "archive_email": "confirm",
       "reply_email": "confirm",
       "compose_email": "confirm",
-      "run_shortcut": "confirm"
+      "run_shortcut": "confirm",
+      "make_purchase": "confirm"
     },
     "limits": {
       "send_message": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
       "reply_email": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
       "compose_email": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
+      "make_purchase": { "per_minute": 1, "per_hour": 5, "per_day": 10 },
       "web_search": { "per_minute": 10, "per_day": 300 },
       "list_email": { "per_minute": 10 },
       "search_email": { "per_minute": 10 },
       "read_email": { "per_minute": 20 }
     }
+  },
+
+  "purchasing": {
+    "vendors": {}
   },
 
   "home": {

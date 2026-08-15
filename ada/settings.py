@@ -101,6 +101,7 @@ DEFAULTS: dict[str, Any] = {
             "reply_email": CONFIRM,
             "run_shortcut": CONFIRM,
             "compose_email": CONFIRM,
+            "make_purchase": CONFIRM,
         },
         # A ceiling on top of confirmation. `confirm` protects against one
         # wrong action; it does nothing about thirty, because the human in the
@@ -119,7 +120,14 @@ DEFAULTS: dict[str, Any] = {
             # A reply is a send: same class as send_message, same ceiling.
             "reply_email": {"per_minute": 3, "per_hour": 10, "per_day": 30},
             "compose_email": {"per_minute": 3, "per_hour": 10, "per_day": 30},
+            # Tighter than the sends: money doesn't come back.
+            "make_purchase": {"per_minute": 1, "per_hour": 5, "per_day": 10},
         },
+    },
+    "purchasing": {
+        # None ship. A vendor is an endpoint the *user* controls; the model
+        # picks one by name and can never supply a destination itself.
+        "vendors": {},
     },
     "home": {
         # Domains that always ask first, whatever autonomy says. Physical
