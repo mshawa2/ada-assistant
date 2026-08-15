@@ -24,7 +24,9 @@
       "forget": "confirm",
       "delete_note": "confirm",
       "set_setting": "confirm",
-      "set_mode": "auto"
+      "set_mode": "auto",
+      "create_event": "confirm",
+      "delete_event": "confirm"
     }
   },
 

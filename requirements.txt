@@ -4,5 +4,9 @@ sounddevice>=0.4.6
 flask>=3.0.0
 webrtcvad-wheels>=2.0.10
 
+# Calendar (macOS only). AppleScript via Calendar.app was measured first and
+# rejected: 37s for a 7-day query vs 0.014s here. See ada/tools/calendar_tool.py.
+pyobjc-framework-EventKit>=10.0; sys_platform == "darwin"
+
 # Tests
 pytest>=8.0.0

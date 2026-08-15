@@ -69,9 +69,16 @@ DEFAULTS: dict[str, Any] = {
     },
     "autonomy": {
         "default": AUTO,
+        # Every consequential tool is listed here, not only in the shipped
+        # ada_config.json. If that file is deleted or hand-broken, the fallback
+        # still has to be the safe one — a missing config must never be the
+        # thing that quietly ungates deleting a note or writing to a calendar.
         "tools": {
             "forget": CONFIRM,
             "delete_note": CONFIRM,
+            "set_setting": CONFIRM,
+            "create_event": CONFIRM,
+            "delete_event": CONFIRM,
         },
     },
     "notifications": {

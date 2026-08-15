@@ -617,6 +617,57 @@ written to the developer's own settings — the same class of mistake as the
 notification tests firing real banners. The `isolated_settings` fixture
 redirects the config path, the legacy-migration paths, and the parse cache.
 
+## Calendar (built and verified)
+
+The first tool that both reads *and writes* real external state other people
+can see — and the first real use of the `confirm` autonomy level the settings
+track was built for.
+
+- **EventKit, not AppleScript — and that was measured, not assumed.** The
+  obvious no-dependency route is `osascript` driving Calendar.app. It was
+  timed first: a seven-day event query took **37 seconds and returned
+  nothing**. EventKit answers the same question in **0.014s** warm. That's the
+  difference between an assistant you ask and one you stop asking, so it's
+  worth the one macOS-only dependency (`pyobjc-framework-EventKit`). Verified
+  create/read-back/delete against the real store before writing any tool code.
+- **Tools:** `list_events` (grouped by day, with ids), `find_events` (title,
+  location and notes), `list_calendars` (marks default and read-only),
+  `create_event`, `delete_event`.
+- **Permission is lazy.** Access is requested on first use, never at import, so
+  someone who never mentions their calendar never sees a permission dialog. A
+  refusal or timeout produces an actionable message naming the exact System
+  Settings pane — same contract as the messages tool's Full Disk Access — and
+  the 30s cap means it can't block a conversation forever waiting on a dialog
+  nobody is there to answer.
+- **Writes are gated `confirm`.** A calendar is shared state other people may
+  see; putting something on it is squarely the class of action the Tier 6 rails
+  exist for. Read-only calendars are refused with the writable ones listed.
+- **`ada/when.py`** now holds the ISO-8601 ↔ epoch conversion and formatting
+  that reminders and calendar both need — two copies of timezone handling is
+  two chances to drift.
+
+**Verified:** 160/160 tests pass (none of which touch the real calendar — the
+event store is faked). Against the **live API and the real calendar**:
+`list_calendars` and `list_events` returned the actual calendars and holidays;
+**declining** a `create_event` left nothing behind; approving created a real
+event with location and duration; `find_events` found it; `delete_event`
+removed it. Every test event was cleaned up — a final search confirms nothing
+named "ADA TEST" remains.
+
+**Two things this shook out.**
+
+1. **The default gating was only in the shipped config file, not in
+   `settings.DEFAULTS`.** A test caught it: with the config file absent, calendar
+   writes would have fallen back to `auto`. Every consequential tool is now
+   listed in `DEFAULTS` too, so a deleted or broken config can never be the
+   thing that quietly ungates a write.
+2. **Double confirmation.** The first `delete_event` description said "always
+   tell them which event you're about to remove", so Ada asked in prose *and*
+   triggered the gate — the user answering twice. The descriptions now say
+   explicitly not to ask beforehand, because running the tool already shows
+   them exactly what will happen and waits. Re-verified: Ada now goes
+   `find_events` → `delete_event` with one gate and no prose preamble.
+
 ## Build discipline
 
 One shared agent core, many ways in and out. Build and verify each tier before
@@ -625,8 +676,8 @@ brain) done. Tier 2 (tools) done. Tier 3 (push-to-talk voice) done. Tier 4
 (durable memory) done. Tier 5 (the heartbeat) done. Tier 6 (the rails) done.
 All six base tiers complete. Plus: the face (local dashboard) done, pending
 your own eyes on the rendered page; the foundations pass; reminders that
-actually fire, with notifications and an always-on daemon; and one settings
-file with per-tool autonomy levels.**
+actually fire, with notifications and an always-on daemon; one settings file
+with per-tool autonomy levels; and real calendar read/write.**
 
 ### Known gaps, deliberately not closed yet
 

@@ -3,11 +3,17 @@ from ada.tools.memory import load_facts
 
 _BASE_PROMPT = """You are {assistant_name}, a personal assistant.
 
-You help with reminders and tasks, answering questions about the user's notes, \
-drafting messages, checking the weather, reading the user's recent iMessage/text \
-messages, and reading/summarizing web pages the user links you to. You can't run \
-open-ended web searches yet — only fetch a specific URL — so say so plainly if \
-asked to search rather than pretending to.
+You help with reminders and tasks, the user's real calendar, answering questions \
+about their notes, drafting messages, checking the weather, reading their recent \
+iMessage/text messages, and reading/summarizing web pages they link you to. You \
+can't run open-ended web searches yet — only fetch a specific URL — so say so \
+plainly if asked to search rather than pretending to.
+
+You can read and write the user's actual calendar. Check it with list_events or \
+find_events before answering anything about their availability or schedule — \
+don't guess or rely on what you remember. Creating and deleting events both ask \
+the user to confirm first. When scheduling, if the duration isn't clear, ask \
+rather than assuming one.
 
 Drafting a message only ever saves it locally for the user to review — you have \
 no ability to actually send anything anywhere. Never imply a message went out. \

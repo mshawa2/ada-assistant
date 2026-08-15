@@ -17,9 +17,8 @@ as explicitly unscheduled rather than quietly never alerting.
 """
 
 import time
-from datetime import datetime
 
-from ada import settings, store
+from ada import store, when
 from ada.tools.registry import tool
 
 _STORE = store.DATA_DIR / "reminders.json"
@@ -40,43 +39,12 @@ def load_reminders() -> list[dict]:
         return _load()
 
 
-def _to_epoch(due_at: str) -> float:
-    """An ISO 8601 string as epoch seconds.
-
-    A naive value is read in the user's configured timezone, not the machine's
-    — so an always-on host in a different zone still schedules "3pm" at 3pm
-    where the user actually is.
-    """
-    try:
-        parsed = datetime.fromisoformat(due_at.strip())
-    except (ValueError, AttributeError) as e:
-        raise ValueError(
-            f"Couldn't read '{due_at}' as a date and time. "
-            "Use ISO 8601 — for example '2026-08-15T15:00' for 3pm on 15 August 2026."
-        ) from e
-
-    if parsed.tzinfo is None:
-        zone = settings.timezone()
-        if zone is not None:
-            parsed = parsed.replace(tzinfo=zone)
-    return parsed.timestamp()
-
-
-def _local(epoch: float) -> datetime:
-    """An epoch timestamp as a datetime in the user's configured timezone."""
-    return datetime.fromtimestamp(epoch, settings.timezone())
-
-
-def _stamp(epoch: float) -> str:
-    return _local(epoch).strftime(f"%a %d %b at {settings.time_format()}")
-
-
 def _describe_due(reminder: dict) -> str:
     due_at = reminder.get("due_at")
     if due_at:
-        when = _stamp(due_at)
+        label = when.stamp(due_at)
         overdue = due_at <= time.time() and not reminder.get("done")
-        return f" (due {when}{', overdue' if overdue else ''})"
+        return f" (due {label}{', overdue' if overdue else ''})"
     if reminder.get("due"):
         # Say so plainly: this one will never alert, and the user should know
         # that rather than assuming it's scheduled.
@@ -135,7 +103,7 @@ def mark_due_notified(ids: list[int]) -> None:
     },
 )
 def add_reminder(text: str, due: str = "", due_at: str = "") -> str:
-    due_epoch = _to_epoch(due_at) if due_at else None
+    due_epoch = when.to_epoch(due_at) if due_at else None
 
     with _lock:
         reminders = _load()
@@ -153,8 +121,7 @@ def add_reminder(text: str, due: str = "", due_at: str = "") -> str:
         _save(reminders)
 
     if due_epoch:
-        when = _stamp(due_epoch)
-        return f"Added reminder #{new_id}: {text} — I'll tell you on {when}."
+        return f"Added reminder #{new_id}: {text} — I'll tell you on {when.stamp(due_epoch)}."
     if due:
         return (
             f"Added reminder #{new_id}: {text} (due {due}). "
@@ -241,7 +208,7 @@ def complete_reminder(id: int) -> str:
     },
 )
 def snooze_reminder(id: int, due_at: str) -> str:
-    due_epoch = _to_epoch(due_at)
+    due_epoch = when.to_epoch(due_at)
 
     with _lock:
         reminders = _load()
@@ -253,6 +220,5 @@ def snooze_reminder(id: int, due_at: str) -> str:
                 reminder["due_notified"] = False
                 reminder["stale_notified"] = False
                 _save(reminders)
-                when = _stamp(due_epoch)
-                return f"Pushed reminder #{id} to {when}."
+                return f"Pushed reminder #{id} to {when.stamp(due_epoch)}."
     raise ValueError(f"No reminder with id {id}.")
