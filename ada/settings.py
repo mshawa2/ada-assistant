@@ -86,7 +86,15 @@ DEFAULTS: dict[str, Any] = {
         # loop is the part that gets tired and starts saying yes.
         "limits": {
             "send_message": {"per_minute": 3, "per_hour": 10, "per_day": 30},
+            # Not a safety rail — this one protects the free tier on your
+            # search provider from a model that decides to search twelve times
+            # to answer one question.
+            "web_search": {"per_minute": 10, "per_day": 300},
         },
+    },
+    "search": {
+        # "auto" picks Brave or Tavily if their key is in .env, else Wikipedia.
+        "provider": "auto",
     },
     "notifications": {
         "channels": ["terminal", "macos"],

@@ -30,8 +30,13 @@
       "send_message": "confirm"
     },
     "limits": {
-      "send_message": { "per_minute": 3, "per_hour": 10, "per_day": 30 }
+      "send_message": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
+      "web_search": { "per_minute": 10, "per_day": 300 }
     }
+  },
+
+  "search": {
+    "provider": "auto"
   },
 
   "notifications": {
