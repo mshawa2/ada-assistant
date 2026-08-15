@@ -36,10 +36,14 @@
       "set_mode": "auto",
       "create_event": "confirm",
       "delete_event": "confirm",
-      "send_message": "confirm"
+      "send_message": "confirm",
+      "mark_email_read": "confirm",
+      "archive_email": "confirm",
+      "reply_email": "confirm"
     },
     "limits": {
       "send_message": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
+      "reply_email": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
       "web_search": { "per_minute": 10, "per_day": 300 },
       "list_email": { "per_minute": 10 },
       "search_email": { "per_minute": 10 },
@@ -51,7 +55,10 @@
     "address": "",
     "imap_host": "imap.gmail.com",
     "imap_port": 993,
-    "mailbox": "INBOX"
+    "mailbox": "INBOX",
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 587,
+    "archive_mailbox": "[Gmail]/All Mail"
   },
 
   "search": {

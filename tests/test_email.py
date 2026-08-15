@@ -161,12 +161,33 @@ def test_fetching_never_marks_mail_as_read(mailbox):
     assert all("PEEK" in command for command in FakeIMAP.instances[0].fetch_commands)
 
 
-def test_there_is_no_send_or_delete_tool():
+def test_there_is_still_no_delete_tool():
+    """Archiving moves a message; nothing here destroys one."""
     from ada.tools import specs
 
     names = {spec["name"] for spec in specs()}
-    assert {"list_email", "search_email", "read_email"} <= names
-    assert {n for n in names if "email" in n} == {"list_email", "search_email", "read_email"}
+    assert {n for n in names if "email" in n} == {
+        "list_email",
+        "search_email",
+        "read_email",
+        "mark_email_read",
+        "archive_email",
+        "reply_email",
+    }
+    assert not [n for n in names if "email" in n and "delete" in n]
+
+
+def test_every_email_mutation_is_gated():
+    """Reads are free; anything that changes the mailbox asks first — and it's
+    gated in DEFAULTS too, so a missing config can't ungate a send."""
+    from ada import safety
+
+    for name in ("mark_email_read", "archive_email", "reply_email"):
+        assert safety.requires_confirmation(name), name
+        assert settings.DEFAULTS["autonomy"]["tools"][name] == settings.CONFIRM, name
+
+    for name in ("list_email", "search_email", "read_email"):
+        assert not safety.requires_confirmation(name), name
 
 
 def test_the_connection_is_closed_even_when_nothing_is_found(mailbox):
@@ -320,3 +341,278 @@ def test_email_is_rate_limited():
     provider and gets the account throttled."""
     assert settings.get("autonomy.limits.list_email.per_minute")
     assert settings.get("autonomy.limits.read_email.per_minute")
+
+
+# --- mutations --------------------------------------------------------------
+
+
+def _support_mutations(monkeypatch):
+    """Teach the fake IMAP the mutation verbs, recording what it was asked."""
+    FakeIMAP.stored = []
+    FakeIMAP.moved = []
+    FakeIMAP.expunged = False
+
+    original_uid = FakeIMAP.uid
+
+    def uid(self, command, *args):
+        if command == "STORE":
+            FakeIMAP.stored.append((args[0], args[1], args[2]))
+            return "OK", [b""]
+        if command in ("MOVE", "COPY"):
+            FakeIMAP.moved.append((command, args[0], args[1]))
+            return "OK", [b""]
+        return original_uid(self, command, *args)
+
+    monkeypatch.setattr(FakeIMAP, "uid", uid, raising=False)
+    monkeypatch.setattr(FakeIMAP, "expunge", lambda self: setattr(FakeIMAP, "expunged", True), raising=False)
+    monkeypatch.setattr(FakeIMAP, "capabilities", (b"IMAP4REV1", b"MOVE"), raising=False)
+
+
+def test_marking_read_asks_the_server_to_set_the_seen_flag(monkeypatch, mailbox):
+    _support_mutations(monkeypatch)
+    mailbox[101] = _message("a@b.com", "One")
+    mailbox[102] = _message("a@b.com", "Two")
+
+    result = email_tool.mark_email_read(["101", "102"])
+
+    assert FakeIMAP.stored == [("101", "+FLAGS", "(\\Seen)"), ("102", "+FLAGS", "(\\Seen)")]
+    assert "2 emails" in result
+
+
+def test_mutations_open_a_writable_session_while_reads_do_not(monkeypatch, mailbox):
+    _support_mutations(monkeypatch)
+    mailbox[101] = _message("a@b.com", "One")
+
+    email_tool.list_email(unread_only=False)
+    assert FakeIMAP.instances[-1].selected_readonly is True, "reads must stay read-only"
+
+    email_tool.mark_email_read(["101"])
+    assert FakeIMAP.instances[-1].selected_readonly is False, "a mutation needs write access"
+
+
+def test_archiving_moves_rather_than_deletes(monkeypatch, mailbox):
+    _support_mutations(monkeypatch)
+    mailbox[101] = _message("a@b.com", "Newsletter")
+
+    result = email_tool.archive_email(["101"])
+
+    assert FakeIMAP.moved == [("MOVE", "101", '"[Gmail]/All Mail"')]
+    assert "Archived" in result
+    assert FakeIMAP.stored == [], "nothing should be flagged deleted when MOVE is available"
+
+
+def test_archiving_falls_back_to_copy_and_expunge_without_move(monkeypatch, mailbox):
+    _support_mutations(monkeypatch)
+    monkeypatch.setattr(FakeIMAP, "capabilities", (b"IMAP4REV1",), raising=False)
+    mailbox[101] = _message("a@b.com", "Newsletter")
+
+    email_tool.archive_email(["101"])
+
+    assert FakeIMAP.moved[0][0] == "COPY", "copy first, so a failure leaves the message"
+    assert ("101", "+FLAGS", "(\\Deleted)") in FakeIMAP.stored
+    assert FakeIMAP.expunged is True
+
+
+def test_a_failed_archive_names_the_folder_to_check(monkeypatch, mailbox):
+    _support_mutations(monkeypatch)
+    monkeypatch.setattr(FakeIMAP, "uid", lambda self, c, *a: ("NO", [b""]), raising=False)
+    mailbox[101] = _message("a@b.com", "Newsletter")
+
+    with pytest.raises(ValueError, match="archive folder"):
+        email_tool.archive_email(["101"])
+
+
+@pytest.mark.parametrize("ids", [[], ["abc"], ["101", "../etc"], ""])
+def test_bad_ids_are_refused_before_touching_the_mailbox(monkeypatch, ids):
+    _support_mutations(monkeypatch)
+
+    with pytest.raises(ValueError):
+        email_tool.mark_email_read(ids)
+
+    assert FakeIMAP.stored == []
+
+
+def test_a_comma_separated_string_is_accepted(monkeypatch, mailbox):
+    """Models reach for a string as often as a list; the meaning is clear."""
+    _support_mutations(monkeypatch)
+    mailbox[101] = _message("a@b.com", "One")
+    mailbox[102] = _message("a@b.com", "Two")
+
+    email_tool.mark_email_read("101, 102")
+
+    assert len(FakeIMAP.stored) == 2
+
+
+def test_the_batch_confirmation_names_the_messages(monkeypatch, mailbox):
+    """'[101, 102]' is uncheckable; subjects are the difference between
+    approving and rubber-stamping."""
+    from ada import agent
+
+    _support_mutations(monkeypatch)
+    mailbox[101] = _message("landlord@example.com", "Boiler service")
+
+    description = agent._describe_action("archive_email", {"email_ids": ["101"]})
+
+    assert "ARCHIVE" in description
+    assert "Boiler service" in description
+    assert "landlord@example.com" in description
+
+
+def test_the_confirmation_degrades_to_ids_if_the_mailbox_is_unreachable(monkeypatch):
+    from ada import agent
+
+    monkeypatch.delenv(email_tool.PASSWORD_KEY_NAME, raising=False)
+
+    description = agent._describe_action("archive_email", {"email_ids": ["101"]})
+
+    assert "[101]" in description, "a failed lookup must not block the gate"
+
+
+# --- replying ---------------------------------------------------------------
+
+
+class FakeSMTP:
+    instances = []
+
+    def __init__(self, host, port, timeout=None):
+        self.host = host
+        self.port = port
+        self.sent = []
+        self.logged_in = None
+        FakeSMTP.instances.append(self)
+
+    def ehlo(self):
+        pass
+
+    def starttls(self, context=None):
+        self.tls = True
+
+    def login(self, address, password):
+        self.logged_in = (address, password)
+
+    def send_message(self, message):
+        self.sent.append(message)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+@pytest.fixture
+def smtp(monkeypatch):
+    FakeSMTP.instances = []
+    monkeypatch.setattr(email_tool.smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(email_tool.smtplib, "SMTP_SSL", FakeSMTP)
+    return FakeSMTP.instances
+
+
+def test_a_reply_goes_to_the_original_sender(mailbox, smtp):
+    mailbox[55] = _message("sam@example.com", "Lunch?")
+
+    result = email_tool.reply_email("55", "Thursday works")
+
+    sent = smtp[0].sent[0]
+    assert sent["To"] == "sam@example.com"
+    assert sent["Subject"] == "Re: Lunch?"
+    assert "Thursday works" in sent.get_content()
+    assert "sam@example.com" in result
+
+
+def test_reply_to_header_wins_over_from(mailbox, smtp):
+    msg = _message("noreply@example.com", "Ticket update")
+    msg["Reply-To"] = "support@example.com"
+    mailbox[56] = msg
+
+    email_tool.reply_email("56", "thanks")
+
+    assert smtp[0].sent[0]["To"] == "support@example.com"
+
+
+def test_a_reply_threads_under_the_original(mailbox, smtp):
+    msg = _message("sam@example.com", "Lunch?")
+    msg["Message-ID"] = "<abc123@example.com>"
+    mailbox[57] = msg
+
+    email_tool.reply_email("57", "yes")
+
+    sent = smtp[0].sent[0]
+    assert sent["In-Reply-To"] == "<abc123@example.com>"
+    assert "<abc123@example.com>" in sent["References"]
+
+
+def test_an_existing_re_prefix_is_not_doubled(mailbox, smtp):
+    mailbox[58] = _message("sam@example.com", "Re: Lunch?")
+
+    email_tool.reply_email("58", "ok")
+
+    assert smtp[0].sent[0]["Subject"] == "Re: Lunch?"
+
+
+def test_an_empty_reply_is_refused(mailbox, smtp):
+    mailbox[59] = _message("sam@example.com", "Lunch?")
+
+    with pytest.raises(ValueError, match="empty reply"):
+        email_tool.reply_email("59", "   ")
+
+    assert smtp == []
+
+
+def test_a_bad_id_is_refused_before_sending(smtp):
+    with pytest.raises(ValueError, match="isn't an email id"):
+        email_tool.reply_email("../etc", "hi")
+
+    assert smtp == []
+
+
+def test_the_reply_confirmation_shows_the_resolved_recipient(mailbox):
+    """The address comes from headers the sender controls — a phishing mail
+    can point Reply-To anywhere, so the user has to see where it's going."""
+    from ada import agent
+
+    msg = _message("noreply@bank.example", "Verify your account")
+    msg["Reply-To"] = "attacker@evil.example"
+    mailbox[60] = msg
+
+    description = agent._describe_action("reply_email", {"email_id": "60", "text": "sure"})
+
+    assert "SEND AN EMAIL REPLY" in description
+    assert "cannot be unsent" in description
+    assert "attacker@evil.example" in description, "the real recipient must be visible"
+
+
+def test_the_send_uses_exactly_what_was_approved(mailbox, smtp):
+    """The confirmation resolves the recipient and the send reuses it, so the
+    address shown and the address used can't be two different lookups."""
+    from ada import agent
+
+    msg = _message("sam@example.com", "Lunch?")
+    mailbox[61] = msg
+
+    agent._describe_action("reply_email", {"email_id": "61", "text": "yes"})
+    # The mailbox changes underneath — the approved target must still win.
+    mailbox[61] = _message("someone-else@example.com", "Different")
+
+    email_tool.reply_email("61", "yes")
+
+    assert smtp[0].sent[0]["To"] == "sam@example.com"
+
+
+def test_replying_is_rate_limited_like_any_other_send():
+    assert settings.get("autonomy.limits.reply_email.per_hour")
+
+
+def test_a_rejected_smtp_login_explains_the_app_password(monkeypatch, mailbox):
+    import smtplib as real_smtplib
+
+    mailbox[62] = _message("sam@example.com", "Lunch?")
+
+    class RejectingSMTP(FakeSMTP):
+        def login(self, address, password):
+            raise real_smtplib.SMTPAuthenticationError(535, b"bad creds")
+
+    monkeypatch.setattr(email_tool.smtplib, "SMTP", RejectingSMTP)
+
+    with pytest.raises(email_tool.EmailUnavailable, match="App Password"):
+        email_tool.reply_email("62", "hi")

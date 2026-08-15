@@ -96,6 +96,9 @@ DEFAULTS: dict[str, Any] = {
             "create_event": CONFIRM,
             "delete_event": CONFIRM,
             "send_message": CONFIRM,
+            "mark_email_read": CONFIRM,
+            "archive_email": CONFIRM,
+            "reply_email": CONFIRM,
         },
         # A ceiling on top of confirmation. `confirm` protects against one
         # wrong action; it does nothing about thirty, because the human in the
@@ -111,6 +114,8 @@ DEFAULTS: dict[str, Any] = {
             "list_email": {"per_minute": 10},
             "search_email": {"per_minute": 10},
             "read_email": {"per_minute": 20},
+            # A reply is a send: same class as send_message, same ceiling.
+            "reply_email": {"per_minute": 3, "per_hour": 10, "per_day": 30},
         },
     },
     "email": {
@@ -120,6 +125,9 @@ DEFAULTS: dict[str, Any] = {
         "imap_host": "imap.gmail.com",
         "imap_port": 993,
         "mailbox": "INBOX",
+        "smtp_host": "smtp.gmail.com",
+        "smtp_port": 587,
+        "archive_mailbox": "[Gmail]/All Mail",
     },
     "search": {
         # "auto" picks Brave or Tavily if their key is in .env, else Wikipedia.
