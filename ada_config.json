@@ -31,8 +31,18 @@
     },
     "limits": {
       "send_message": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
-      "web_search": { "per_minute": 10, "per_day": 300 }
+      "web_search": { "per_minute": 10, "per_day": 300 },
+      "list_email": { "per_minute": 10 },
+      "search_email": { "per_minute": 10 },
+      "read_email": { "per_minute": 20 }
     }
+  },
+
+  "email": {
+    "address": "",
+    "imap_host": "imap.gmail.com",
+    "imap_port": 993,
+    "mailbox": "INBOX"
   },
 
   "search": {

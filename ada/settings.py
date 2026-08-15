@@ -90,7 +90,20 @@ DEFAULTS: dict[str, Any] = {
             # search provider from a model that decides to search twelve times
             # to answer one question.
             "web_search": {"per_minute": 10, "per_day": 300},
+            # Each call is a fresh IMAP login; a loop would look like an
+            # attack to the mail provider and get the account throttled.
+            "list_email": {"per_minute": 10},
+            "search_email": {"per_minute": 10},
+            "read_email": {"per_minute": 20},
         },
+    },
+    "email": {
+        # Address and server are config; the app password is a secret and
+        # lives in .env as IMAP_PASSWORD, never here.
+        "address": "",
+        "imap_host": "imap.gmail.com",
+        "imap_port": 993,
+        "mailbox": "INBOX",
     },
     "search": {
         # "auto" picks Brave or Tavily if their key is in .env, else Wikipedia.
