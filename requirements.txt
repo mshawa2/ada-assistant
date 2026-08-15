@@ -1,0 +1,8 @@
+anthropic>=0.40.0
+python-dotenv>=1.0.0
+sounddevice>=0.4.6
+flask>=3.0.0
+webrtcvad-wheels>=2.0.10
+
+# Tests
+pytest>=8.0.0

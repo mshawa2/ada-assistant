@@ -1,0 +1,15 @@
+{
+  "tick_seconds": 30,
+  "quiet_hours": { "start": "22:00", "end": "08:00" },
+  "checks": {
+    "stale_reminders": {
+      "enabled": true,
+      "interval_seconds": 3600,
+      "stale_after_hours": 24
+    },
+    "new_notes": {
+      "enabled": true,
+      "interval_seconds": 300
+    }
+  }
+}

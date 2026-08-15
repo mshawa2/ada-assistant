@@ -1,0 +1,17 @@
+# Secrets — never commit
+.env
+
+# Ada's live data (reminders, memory, notes, drafts, audit log, session history)
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Editors
+.idea/
+.vscode/
+.DS_Store
