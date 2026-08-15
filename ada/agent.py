@@ -82,6 +82,24 @@ def _execute_tool_calls(
         if block.type != "tool_use":
             continue
 
+        if safety.is_denied(block.name):
+            # Switched off in settings. The model is told plainly, so it can
+            # say so rather than silently retrying a tool that will never run.
+            on_status(f"blocked: {block.name} is switched off")
+            audit.log("tool_denied", tool=block.name, input=block.input)
+            results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": (
+                        f"The '{block.name}' tool is switched off in the user's settings and "
+                        "cannot run. Tell them plainly; don't try again."
+                    ),
+                    "is_error": True,
+                }
+            )
+            continue
+
         if safety.requires_confirmation(block.name):
             description = _describe_action(block.name, block.input)
             status.set_pending_confirmation(description)

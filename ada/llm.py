@@ -2,16 +2,19 @@ from collections.abc import Iterator
 
 import anthropic
 
-from ada import audit, cost
-from ada.config import ANTHROPIC_API_KEY, MODEL
+from ada import audit, cost, settings
+from ada.config import ANTHROPIC_API_KEY
 from ada.system_prompt import build_system_prompt
 
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-# 1024 was enough for chat-length replies but silently truncated the long ones
-# — a summarized web page, a digest of several notes. `agent.py` now says so
-# out loud when a reply is cut off; this raises the ceiling so it rarely is.
-MAX_TOKENS = 4096
+# Fallbacks only — the live values come from ada_config.json's `model` block,
+# read per call so a change takes effect without a restart. 1024 was the old
+# hardcoded cap and it silently truncated long replies (a summarized web page,
+# a digest of several notes); `agent.py` now says so out loud when a reply is
+# cut off, and the default ceiling is high enough that it rarely is.
+DEFAULT_MODEL = "claude-sonnet-5"
+DEFAULT_MAX_TOKENS = 4096
 
 
 class LLMError(Exception):
@@ -28,8 +31,8 @@ def stream_turn(messages: list[dict], tools: list[dict]) -> Iterator[str]:
     """
     try:
         with _client.messages.stream(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
+            model=settings.get("model.conversation", DEFAULT_MODEL),
+            max_tokens=settings.get("model.max_tokens", DEFAULT_MAX_TOKENS),
             system=build_system_prompt(),
             messages=messages,
             tools=tools,

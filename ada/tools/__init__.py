@@ -6,6 +6,7 @@ from ada.tools import (  # noqa: F401  imported for tool-registration side effec
     notes,
     notices,
     reminders,
+    settings_tool,
     weather,
     web,
 )

@@ -19,7 +19,7 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-never-used")
 
 import pytest  # noqa: E402
 
-from ada import notify  # noqa: E402
+from ada import notify, settings  # noqa: E402
 
 # A window of zero width is never active, so quiet hours are off unless a test
 # asks for them. Without this, notification tests would pass or fail depending
@@ -41,6 +41,26 @@ def clean_data_dir():
         else:
             child.unlink()
     yield
+
+
+@pytest.fixture(autouse=True)
+def isolated_settings(monkeypatch):
+    """Point the settings file at the temp directory, not the real repo.
+
+    `ada_config.json` lives at the repo root rather than under `data/`, so
+    without this a test that writes a setting would edit the developer's own
+    configuration — and the legacy-migration path would read their real
+    heartbeat_config.json. Everything here is redirected into the throwaway
+    directory, and the parse cache is cleared so no state leaks between tests.
+    """
+    monkeypatch.setattr(settings, "_CONFIG_FILE", TEST_DATA_DIR / "ada_config.json")
+    monkeypatch.setattr(settings, "_LEGACY_HEARTBEAT", TEST_DATA_DIR / "heartbeat_config.json")
+    monkeypatch.setattr(settings, "_LEGACY_SAFETY", TEST_DATA_DIR / "safety_config.json")
+    settings._cache["stamp"] = None
+    settings._cache["value"] = None
+    yield
+    settings._cache["stamp"] = None
+    settings._cache["value"] = None
 
 
 @pytest.fixture(autouse=True)

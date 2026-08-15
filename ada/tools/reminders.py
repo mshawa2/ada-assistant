@@ -19,7 +19,7 @@ as explicitly unscheduled rather than quietly never alerting.
 import time
 from datetime import datetime
 
-from ada import store
+from ada import settings, store
 from ada.tools.registry import tool
 
 _STORE = store.DATA_DIR / "reminders.json"
@@ -41,7 +41,12 @@ def load_reminders() -> list[dict]:
 
 
 def _to_epoch(due_at: str) -> float:
-    """An ISO 8601 string as epoch seconds. A naive value means local time."""
+    """An ISO 8601 string as epoch seconds.
+
+    A naive value is read in the user's configured timezone, not the machine's
+    — so an always-on host in a different zone still schedules "3pm" at 3pm
+    where the user actually is.
+    """
     try:
         parsed = datetime.fromisoformat(due_at.strip())
     except (ValueError, AttributeError) as e:
@@ -49,13 +54,27 @@ def _to_epoch(due_at: str) -> float:
             f"Couldn't read '{due_at}' as a date and time. "
             "Use ISO 8601 — for example '2026-08-15T15:00' for 3pm on 15 August 2026."
         ) from e
+
+    if parsed.tzinfo is None:
+        zone = settings.timezone()
+        if zone is not None:
+            parsed = parsed.replace(tzinfo=zone)
     return parsed.timestamp()
+
+
+def _local(epoch: float) -> datetime:
+    """An epoch timestamp as a datetime in the user's configured timezone."""
+    return datetime.fromtimestamp(epoch, settings.timezone())
+
+
+def _stamp(epoch: float) -> str:
+    return _local(epoch).strftime(f"%a %d %b at {settings.time_format()}")
 
 
 def _describe_due(reminder: dict) -> str:
     due_at = reminder.get("due_at")
     if due_at:
-        when = datetime.fromtimestamp(due_at).strftime("%a %d %b at %H:%M")
+        when = _stamp(due_at)
         overdue = due_at <= time.time() and not reminder.get("done")
         return f" (due {when}{', overdue' if overdue else ''})"
     if reminder.get("due"):
@@ -134,7 +153,7 @@ def add_reminder(text: str, due: str = "", due_at: str = "") -> str:
         _save(reminders)
 
     if due_epoch:
-        when = datetime.fromtimestamp(due_epoch).strftime("%a %d %b at %H:%M")
+        when = _stamp(due_epoch)
         return f"Added reminder #{new_id}: {text} — I'll tell you on {when}."
     if due:
         return (
@@ -234,6 +253,6 @@ def snooze_reminder(id: int, due_at: str) -> str:
                 reminder["due_notified"] = False
                 reminder["stale_notified"] = False
                 _save(reminders)
-                when = datetime.fromtimestamp(due_epoch).strftime("%a %d %b at %H:%M")
+                when = _stamp(due_epoch)
                 return f"Pushed reminder #{id} to {when}."
     raise ValueError(f"No reminder with id {id}.")

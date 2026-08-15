@@ -549,6 +549,74 @@ pins the config — which also removed a latent flake, since quiet hours are
 22:00–08:00 and the notification tests would otherwise have passed or failed
 depending on what time of day the suite ran.
 
+## Settings (built and verified)
+
+Settings used to live in three places that didn't know about each other:
+`heartbeat_config.json`, `safety_config.json`, and constants in the code.
+`ada_config.json` is now the one file, read through `ada/settings.py`, and
+both old files are gone (their contents carried over; recoverable from git).
+
+- **Layering.** Effective settings are `DEFAULTS` <- your file <- the active
+  mode's preset. Your file only holds what you actually changed, so a default
+  improved in code reaches you without an edit, and a mode is a small patch
+  rather than a duplicated config. Lists replace rather than append — "channels
+  are just ntfy" has to be expressible.
+- **Hot reload** on mtime+size, so editing the file takes effect on the next
+  read with no restart. Retiring the last "you have to restart Ada for that".
+- **Per-tool autonomy: `auto` / `confirm` / `deny`**, replacing the binary
+  gated-or-not list. This is the prerequisite for ever adding a send-or-spend
+  tool: a flat list can express "ask first" but not "never, not even if asked".
+  `deny` is enforced in `agent.py` *before* the confirmation prompt, and the
+  model is told the tool is switched off so it explains rather than retrying.
+- **Failing safe.** An autonomy value that isn't recognised becomes `confirm`,
+  never `auto`. A typo in the one file that decides what runs unattended must
+  not be able to quietly widen permissions.
+- **Migration, not a break.** `_migrate_legacy()` folds the two old files into
+  the new one on first run *only if the new one is absent*, so someone
+  upgrading with hand-tuned values keeps them instead of being reset.
+- **Settings tools** — `get_settings`, `set_setting`, `set_mode`, `list_modes`.
+  This is the base spec's fourth rail ("change a setting") finally having a
+  tool to gate; until now the category was theoretical, and the gate only ever
+  covered deletions. `set_setting` is `confirm`-gated.
+- **Two deliberate exceptions, both stated rather than hidden:** `set_mode` is
+  `auto`, because a mode only applies a preset the user wrote, is bounded and
+  is instantly reversible — gating it would mean typing y every time you said
+  "focus mode", which is how people end up switching a safety feature off. It's
+  listed explicitly under `autonomy.tools` so it reads as a decision. And
+  `autonomy.*` itself **cannot be changed through conversation at all**: the
+  model must not be able to edit the rules that govern the model. Hand-edit the
+  file.
+- **Modes** ship as `focus` (critical-only pushes, no note-watching),
+  `weekend` (later quiet hours, no staleness nagging) and `away` (push to
+  phone only).
+- **Locale** — `timezone`, `time_format`, `units`. A naive `due_at` is now read
+  in the *configured* zone, so an always-on host in a different timezone still
+  schedules "3pm" at 3pm where you are. An unknown zone warns and falls back
+  rather than raising.
+- **Identity** — assistant name, your name and pronouns, tone and verbosity all
+  feed the system prompt, so "be less chatty" is a config change rather than a
+  code edit.
+- **`ADA_CONFIG_FILE`** relocates the settings file, same reasoning as
+  `ADA_DATA_DIR`. And **`ADA_NTFY_TOPIC` in `.env` overrides the config value**,
+  because `ada_config.json` is tracked in git and an ntfy topic is effectively
+  a password — putting it in the tracked file would commit it.
+
+**Verified:** 133/133 tests pass. Against the **live API**, in a throwaway
+config: "I'm heading into deep work — focus mode please" switched modes and
+narrowed `push_levels` to `["critical"]` through the mode patch; two
+`set_setting` calls each asked for confirmation and applied; **declining** one
+left the old value intact and Ada said so without retrying; "back to normal"
+restored the base settings. Separately, editing the config file underneath a
+running process changed `tick_seconds` 30→7 with no restart, and a tool set to
+`deny` was blocked before the confirmation prompt — Ada explained it was
+switched off and offered an alternative instead of trying again.
+
+**Caught before it could bite:** `ada_config.json` lives at the repo root
+rather than under `data/`, so the first version of the test suite would have
+written to the developer's own settings — the same class of mistake as the
+notification tests firing real banners. The `isolated_settings` fixture
+redirects the config path, the legacy-migration paths, and the parse cache.
+
 ## Build discipline
 
 One shared agent core, many ways in and out. Build and verify each tier before
@@ -556,17 +624,18 @@ starting the next; never fuse tiers together. Current status: **Tier 1 (the
 brain) done. Tier 2 (tools) done. Tier 3 (push-to-talk voice) done. Tier 4
 (durable memory) done. Tier 5 (the heartbeat) done. Tier 6 (the rails) done.
 All six base tiers complete. Plus: the face (local dashboard) done, pending
-your own eyes on the rendered page; the foundations pass; and reminders that
-actually fire, with notifications and an always-on daemon.**
+your own eyes on the rendered page; the foundations pass; reminders that
+actually fire, with notifications and an always-on daemon; and one settings
+file with per-tool autonomy levels.**
 
 ### Known gaps, deliberately not closed yet
 
 Recorded so they're a decision rather than an oversight:
 
-- **Settings are scattered** across `heartbeat_config.json`,
-  `safety_config.json`, and hardcoded values (`MODEL`, voice ID), and
-  `heartbeat/loop.py` reads its config once at `start()`, so tuning needs a
-  restart. The confirmation gate is also still binary (gated / not) rather than
-  per-tool autonomy levels — which is what adding any send-or-spend tool would
-  need.
 - **Session trimming drops the old prefix rather than summarizing it.**
+- **No rate or spend limits per tool.** The autonomy levels are the right
+  shape for it (`auto`/`confirm`/`deny`), but there's no "at most N times an
+  hour" or "never more than £X" — which a real spending tool would want on top
+  of `confirm`.
+- **Still no send capability anywhere**, by design. The rails now have the
+  shape to support one; nothing has been pointed at an outbox yet.

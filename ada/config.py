@@ -12,7 +12,10 @@ if not ANTHROPIC_API_KEY:
         "ANTHROPIC_API_KEY is not set. Copy .env.example to .env and add your key."
     )
 
-MODEL = "claude-sonnet-5"
+# Which model to use is a preference, not a secret, so it lives in
+# ada_config.json (`model.conversation`) rather than here. This module is only
+# for things that come from the environment: keys, and the voice id that's
+# tied to one.
 
 # Only needed for voice mode — checked lazily by require_voice_keys() rather
 # than at import time, so the text REPL never needs these.

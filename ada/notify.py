@@ -19,6 +19,7 @@ Nothing in here is allowed to take down the heartbeat. Every channel is
 wrapped, and a channel that fails is reported and skipped.
 """
 
+import os
 import shutil
 import subprocess
 import urllib.error
@@ -121,7 +122,10 @@ def _send_ntfy(text: str, settings: dict, urgent: bool) -> bool:
     a topic name is effectively a shared secret, so anyone who learns yours can
     read your notices. Pick an unguessable one.
     """
-    topic = settings.get("ntfy_topic", "").strip()
+    # Env first: ada_config.json is tracked in git, and a topic name is
+    # effectively a password — anyone who learns yours can read your notices.
+    # ADA_NTFY_TOPIC in .env keeps it out of the repo.
+    topic = (os.environ.get("ADA_NTFY_TOPIC") or settings.get("ntfy_topic", "")).strip()
     if not topic:
         return False
 
