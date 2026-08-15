@@ -15,7 +15,7 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-46 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+48 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
@@ -26,7 +26,8 @@ depending on the arguments (a lock, not a lamp). Everything else runs freely.
 | Email | `archive_email` ⚠️, `list_email`, `mark_email_read` ⚠️, `read_email`, `reply_email` ⚠️, `search_email` |
 | Notes & drafts | `delete_note` ⚠️, `list_drafts`, `list_notes`, `read_draft`, `read_note`, `save_draft`, `search_notes` |
 | Web | `fetch_url`, `get_weather`, `web_search` |
-| Home & Mac | `control_home_device` ⚠️*, `device_history`, `list_home_devices`, `media_control`, `run_shortcut` ⚠️, `system_control` |
+| Home | `control_home_device` ⚠️*, `device_history`, `list_home_devices`, `run_shortcut` ⚠️ |
+| Mac & music | `media_control`, `play_music`, `search_music`, `system_control` |
 | Memory | `forget` ⚠️, `list_memory`, `remember`, `update_memory` |
 | Ada herself | `dismiss_notice`, `get_settings`, `get_spending`, `heartbeat`, `list_modes`, `list_notices`, `set_mode`, `set_setting` ⚠️ |
 
@@ -1058,6 +1059,38 @@ last night and ran till 01:10, so about 2.5 hours of heat overnight. Off since
 then."* — the entity looked up first, then the history queried and turned into
 an answer rather than a data dump.
 
+## Track selection (built and verified)
+
+`media_control` was transport-only. `search_music` and `play_music` add the
+choosing half, in the shape this project uses everywhere else for acting on a
+specific thing: search hands back a stable persistent ID, play takes it, so
+"no, the other one" is exact rather than a second guess. Playing straight from
+a query is still allowed — the wrong song is a trivial, instantly reversible
+harm, unlike the wrong recipient — but the reply always names what actually
+started, so it can be corrected.
+
+Measured before building, because a library `whose` query is the same shape
+that took 37 seconds on Calendar: **0.12s across 1,631 tracks.** It's fine.
+
+- A bare query that matches no track falls back to a playlist, because "play
+  my 90s music" shouldn't require the user to know which kind of thing that is.
+- Library-only, and it says so. Implying it had searched all of Apple Music
+  would be a quiet lie.
+
+**A real bug this caught, which no test could have.** `kind` is an AppleScript
+reserved word — every object has a `kind` property — so `set kind to ...`
+failed at runtime with -10006 while all 377 faked tests passed. It surfaced on
+the very first call against the real library. Fixed by renaming the script
+variables, and there's now a static guard asserting no script constant assigns
+to any known reserved word; it was checked against the original buggy string
+to confirm it isn't vacuous.
+
+**Verified** against the real library: artist search returned the right single
+match, `love` returned the 25-result cap (79 raw), a nonsense query missed
+honestly, persistent IDs round-tripped stably, and playlist matching handled
+exact, fuzzy and miss. Then end to end with audio — search → id → play →
+confirm → pause — which is the one thing the fakes genuinely can't stand in for.
+
 ## Consolidation notes
 
 The sections above are in **build order**, not importance order — each records
@@ -1107,8 +1140,9 @@ and Mac control; and a consolidation pass.**
 Recorded so they're a decision rather than an oversight:
 
 - **Session trimming drops the old prefix rather than summarizing it.**
-- **Media control is transport only** — play/pause/skip, no picking a track or
-  playlist, and Apple Music only.
+- **Music is library-only and Apple Music only** — Ada can play what the user
+  has added, not the whole streaming catalogue, and says so rather than
+  implying otherwise.
 - **No purchasing tool.** The spend rail exists and defaults to zero, so one
   can be added safely — but nothing spends money except the model itself.
 - **No email deletion**, deliberately. Archiving moves a message; nothing can

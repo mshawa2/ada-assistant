@@ -472,3 +472,228 @@ def test_a_malformed_timestamp_is_skipped_not_crashed_on(monkeypatch):
     result = home.device_history("light.kitchen", hours_back=6)
 
     assert "off for" in result, "the good entry still counts"
+
+
+# --- picking music ----------------------------------------------------------
+
+
+def _music(monkeypatch, tracks=(), playlists=()):
+    """Fake the Music library. Returns the list of osascript calls made."""
+    calls = []
+    rows = "\n".join(f"{t['id']}\t{t['title']}\t{t['artist']}\t{t['album']}" for t in tracks)
+
+    def fake(cmd, **kwargs):
+        calls.append(cmd)
+        script = cmd[2]
+        if script == mac._SEARCH_MUSIC:
+            query, kind = cmd[3].lower(), cmd[4]
+            matched = []
+            for t in tracks:
+                field = {
+                    "track": t["title"],
+                    "artist": t["artist"],
+                    "album": t["album"],
+                }.get(kind, f"{t['title']} {t['artist']} {t['album']}")
+                if query in field.lower():
+                    matched.append(t)
+            out = "\n".join(f"{t['id']}\t{t['title']}\t{t['artist']}\t{t['album']}" for t in matched)
+            return subprocess.CompletedProcess(cmd, 0, out, "")
+        if script == mac._LIST_PLAYLISTS:
+            return subprocess.CompletedProcess(cmd, 0, ", ".join(playlists), "")
+        if script == mac._PLAY_TRACK:
+            found = next((t for t in tracks if t["id"] == cmd[3]), None)
+            if not found:
+                return subprocess.CompletedProcess(cmd, 1, "", "no such track")
+            return subprocess.CompletedProcess(cmd, 0, f"{found['title']}\t{found['artist']}", "")
+        if script == mac._PLAY_PLAYLIST:
+            return subprocess.CompletedProcess(cmd, 0, cmd[3], "")
+        return subprocess.CompletedProcess(cmd, 0, rows, "")
+
+    monkeypatch.setattr(mac.shutil, "which", lambda _n: "/usr/bin/osascript")
+    monkeypatch.setattr(mac.subprocess, "run", fake)
+    return calls
+
+
+TRACKS = [
+    {"id": "AAA1", "title": "Blue Monday", "artist": "New Order", "album": "Power Corruption"},
+    {"id": "BBB2", "title": "Blue Monday (remix)", "artist": "New Order", "album": "Singles"},
+    {"id": "CCC3", "title": "Bang!", "artist": "AJR", "album": "OK Orchestra"},
+]
+
+
+def test_searching_lists_tracks_with_ids(monkeypatch):
+    _music(monkeypatch, TRACKS)
+
+    result = mac.search_music("blue monday")
+
+    assert "Blue Monday — New Order" in result
+    assert "id=AAA1" in result, "an id is what makes 'the other one' exact"
+
+
+def test_search_can_be_narrowed_to_one_field(monkeypatch):
+    _music(monkeypatch, TRACKS)
+
+    assert "Bang!" in mac.search_music("AJR", kind="artist")
+    assert "Bang!" not in mac.search_music("AJR", kind="track")
+
+
+def test_search_is_honest_about_only_seeing_the_library(monkeypatch):
+    """Implying it searched all of streaming would be a quiet lie."""
+    _music(monkeypatch, TRACKS)
+
+    result = mac.search_music("something nobody owns")
+
+    assert "Nothing in the library" in result
+    assert "not the whole Apple Music catalogue" in result
+
+
+def test_an_empty_music_query_is_refused(monkeypatch):
+    _music(monkeypatch, TRACKS)
+
+    with pytest.raises(ValueError, match="No search query"):
+        mac.search_music("  ")
+
+
+def test_playing_by_id_is_exact(monkeypatch):
+    calls = _music(monkeypatch, TRACKS)
+
+    result = mac.play_music(track_id="BBB2")
+
+    assert "Blue Monday (remix)" in result
+    assert calls[-1][2] == mac._PLAY_TRACK
+    assert calls[-1][3] == "BBB2"
+
+
+def test_an_id_beats_a_query(monkeypatch):
+    """search_music hands back an id precisely so this can't re-guess."""
+    calls = _music(monkeypatch, TRACKS)
+
+    mac.play_music(query="Bang!", track_id="AAA1")
+
+    assert calls[-1][3] == "AAA1"
+
+
+def test_playing_by_query_takes_the_best_match_and_says_what_else_matched(monkeypatch):
+    _music(monkeypatch, TRACKS)
+
+    result = mac.play_music(query="blue monday")
+
+    assert "Playing: Blue Monday — New Order" in result
+    assert "1 other match" in result, "the user needs to know it picked"
+
+
+def test_a_single_match_has_no_noise_about_alternatives(monkeypatch):
+    _music(monkeypatch, TRACKS)
+
+    result = mac.play_music(query="Bang!")
+
+    assert "other match" not in result
+
+
+def test_a_playlist_can_be_played_by_name(monkeypatch):
+    calls = _music(monkeypatch, TRACKS, playlists=["TikTok Songs", "90's Music"])
+
+    result = mac.play_music(query="tiktok songs", kind="playlist")
+
+    assert "Playing playlist: TikTok Songs" in result
+    assert calls[-1][2] == mac._PLAY_PLAYLIST
+
+
+def test_a_query_matching_no_track_falls_back_to_a_playlist(monkeypatch):
+    """'play my 90s music' is a playlist, not a song, and the user shouldn't
+    have to know which kind of thing it is."""
+    _music(monkeypatch, TRACKS, playlists=["90's Music"])
+
+    result = mac.play_music(query="90's Music")
+
+    assert "Playing playlist: 90's Music" in result
+
+
+def test_an_unknown_playlist_is_refused_rather_than_guessed(monkeypatch):
+    _music(monkeypatch, TRACKS, playlists=["TikTok Songs"])
+
+    with pytest.raises(ValueError, match="No playlist called"):
+        mac.play_music(query="Jazz Classics", kind="playlist")
+
+
+def test_nothing_matching_says_so_rather_than_playing_something_random(monkeypatch):
+    _music(monkeypatch, TRACKS, playlists=[])
+
+    result = mac.play_music(query="obscure thing nobody has")
+
+    assert "Nothing in the library" in result
+
+
+def test_playing_needs_something_to_play(monkeypatch):
+    _music(monkeypatch, TRACKS)
+
+    with pytest.raises(ValueError, match="Nothing to play"):
+        mac.play_music()
+
+
+def test_shuffle_is_set_before_playing(monkeypatch):
+    calls = _music(monkeypatch, TRACKS)
+
+    mac.play_music(query="Bang!", shuffle=True)
+
+    scripts = [c[2] for c in calls]
+    assert mac._SET_SHUFFLE in scripts
+    assert scripts.index(mac._SET_SHUFFLE) < scripts.index(mac._PLAY_TRACK)
+
+
+def test_music_queries_travel_as_arguments_not_script_source(monkeypatch):
+    """A track name — or a user phrase — must never become AppleScript."""
+    calls = _music(monkeypatch, TRACKS)
+    payload = 'x" & (do shell script "rm -rf ~") & "'
+
+    mac.search_music(payload)
+
+    assert calls[-1][2] == mac._SEARCH_MUSIC, "the script is a fixed constant"
+    assert payload in calls[-1], "the query is its own argv item"
+    assert "rm -rf" not in calls[-1][2]
+
+
+def test_an_invalid_music_kind_is_refused(monkeypatch):
+    _music(monkeypatch, TRACKS)
+
+    with pytest.raises(ValueError, match="isn't a music search kind"):
+        mac.search_music("anything", kind="lyrics")
+
+
+def test_the_music_tools_are_registered_and_ungated():
+    from ada.tools import specs
+
+    names = {s["name"] for s in specs()}
+    assert {"search_music", "play_music"} <= names
+    assert not safety.requires_confirmation("play_music"), "wrong song is trivially reversible"
+
+
+def test_no_applescript_constant_assigns_to_a_reserved_word():
+    """A real bug, caught only by running against the real library: `kind` is
+    an AppleScript reserved word (every object has a `kind` property), so
+    `set kind to ...` failed with -10006 while every faked test passed.
+
+    The fakes can't execute AppleScript, so this is a static guard on the
+    class of mistake rather than on that one instance.
+    """
+    reserved = [
+        "kind", "name", "id", "class", "count", "text", "date", "time", "length",
+        "result", "item", "items", "index", "version", "size", "color", "state",
+        "container", "properties", "character", "word", "paragraph",
+    ]
+    scripts = {
+        "_SEARCH_MUSIC": mac._SEARCH_MUSIC,
+        "_PLAY_TRACK": mac._PLAY_TRACK,
+        "_PLAY_PLAYLIST": mac._PLAY_PLAYLIST,
+        "_SET_SHUFFLE": mac._SET_SHUFFLE,
+        "_SET_VOLUME": mac._SET_VOLUME,
+        "_SET_MUTED": mac._SET_MUTED,
+        **{f"_MEDIA_SCRIPTS[{k}]": v for k, v in mac._MEDIA_SCRIPTS.items()},
+    }
+
+    for script_name, script in scripts.items():
+        for word in reserved:
+            assert f"set {word} to " not in script, (
+                f"{script_name} assigns to AppleScript's reserved word '{word}' — "
+                "this fails at runtime and no faked test will catch it"
+            )
