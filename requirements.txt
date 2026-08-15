@@ -8,5 +8,9 @@ webrtcvad-wheels>=2.0.10
 # rejected: 37s for a 7-day query vs 0.014s here. See ada/tools/calendar_tool.py.
 pyobjc-framework-EventKit>=10.0; sys_platform == "darwin"
 
+# Contacts (macOS only). Lets "text Mom" resolve to a real number instead of
+# being a guess. Read-only — see ada/tools/contacts.py.
+pyobjc-framework-Contacts>=10.0; sys_platform == "darwin"
+
 # Tests
 pytest>=8.0.0

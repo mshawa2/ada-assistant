@@ -37,8 +37,8 @@ extending the code; update it when a real decision changes.
    Full Disk Access (System Settings > Privacy & Security) — verified the tool fails with a clear,
    actionable message rather than crashing when that permission isn't yet granted; the actual read
    path is unverified until Full Disk Access is granted (not something either of us can do
-   programmatically). Shows sender phone numbers/emails, not contact names — no Contacts access, and
-   the system prompt says so explicitly rather than letting Ada guess at who a number belongs to. Text
+   programmatically). Shows sender phone numbers/emails, not contact names; those can now be resolved
+   deliberately via `find_contact` (see "Contacts"), never guessed at. Text
    extraction falls back to a best-effort parse of the legacy `attributedBody` archive format when the
    plain `text` column is empty (rich messages, tapbacks); genuinely fragile by nature, so it degrades
    to `"[unreadable message]"` rather than crashing when it can't parse a given message.
@@ -701,9 +701,9 @@ is mostly guardrails and a little AppleScript, deliberately.
   recipient is refused — that usually means the model tried to fan out, and a
   loop that texts several people is the failure this must not make easy.
 - **No guessing who "Mom" is.** The handle must be a phone number or email.
-  There's no Contacts access, so resolving a name is a guess, and guessing
-  wrong texts a stranger. The refusal tells the model to find the handle with
-  `read_recent_messages` or ask.
+  A name is refused outright; resolving one is `find_contact`'s job (see
+  "Contacts"), which returns every option and makes Ada ask rather than pick.
+  Guessing wrong texts a stranger.
 - **The text is never interpolated into AppleScript** — both recipient and body
   travel as argv items against a fixed script constant. This matters more here
   than anywhere else in the project, because Ada can *read* incoming messages,
@@ -743,6 +743,42 @@ patches the *shared* subprocess module process-wide, not just this tool's use
 of it. Traced rather than assumed, because "a send was attempted" is not
 something to wave away.
 
+## Contacts (built and verified)
+
+"Text Mom" now works — but the point of this tier is *how* it works, because
+resolving a name to a number is the exact step `send_message` was written to
+refuse. Contacts doesn't relax that rule; it makes the lookup explicit and
+visible instead of a guess.
+
+- **`find_contact` never sends and never chooses.** It returns every match
+  with every handle, each labelled. `send_message` still only accepts a real
+  phone number or email, so a name always passes through a step where the
+  actual number is said out loud.
+- **Ambiguity is surfaced, not resolved.** This isn't hypothetical: the very
+  first contact tested on this machine — "Mom" — has *two* numbers. Picking one
+  would be a coin flip on which device gets read. The tool flags it and the
+  prompt tells Ada to ask.
+- **`recipient_label` on `send_message`.** A bare `+1773…` is unrecognisable at
+  a glance, so a lookup that resolved to the wrong person would sail straight
+  through the confirmation. The prompt now reads
+  `To:   Mom (mobile)  (+1773…)`. The label is display only and cannot affect
+  delivery — there's a test for exactly that, because a label that could
+  misdirect would be worse than no label.
+- **Search only, never a dump.** There is no "list all contacts". An assistant
+  that can recite a whole address book is a privacy problem waiting for a
+  prompt injection. Results are capped and the overflow is reported.
+- **Read-only.** No write API is exposed, so Ada can't edit or delete a contact
+  even if asked. Permission is lazy, like the calendar.
+- **CNContactStore, not AppleScript** — 130 contacts enumerated in 0.265s.
+
+**Verified:** 204/204 tests pass, none of them reading a real contact. Live
+against the **real address book**: "text Mom and say I'll call her tonight" →
+Ada looked her up, found two numbers, and **asked which** rather than picking;
+answering "her mobile" produced a confirmation naming both the person and the
+number; declining sent nothing; approving produced exactly one send to the
+right handle. (Real numbers were redacted from the test output rather than
+printed into a transcript.)
+
 ## Build discipline
 
 One shared agent core, many ways in and out. Build and verify each tier before
@@ -752,8 +788,8 @@ brain) done. Tier 2 (tools) done. Tier 3 (push-to-talk voice) done. Tier 4
 All six base tiers complete. Plus: the face (local dashboard) done, pending
 your own eyes on the rendered page; the foundations pass; reminders that
 actually fire, with notifications and an always-on daemon; one settings file
-with per-tool autonomy levels; real calendar read/write; and iMessage send
-behind the rails.**
+with per-tool autonomy levels; real calendar read/write; iMessage send behind
+the rails; and contact lookup so texting by name works.**
 
 ### Known gaps, deliberately not closed yet
 
@@ -763,6 +799,6 @@ Recorded so they're a decision rather than an oversight:
 - **No spend limits.** `ada/limits.py` now does rate limits (per minute/hour/
   day), but there's no "never more than £X", which a real purchasing tool would
   want on top of `confirm`.
-- **No Contacts access**, so sending needs an explicit phone number or email.
-  "Text Mom" only works if Ada can find the handle in recent messages.
 - **Sending is iMessage only** — no email, no other channels.
+- **Contacts is read-only and search-only** — Ada can't add or edit a contact,
+  and there's no way to list the whole address book (deliberate).
