@@ -79,6 +79,13 @@ DEFAULTS: dict[str, Any] = {
             "set_setting": CONFIRM,
             "create_event": CONFIRM,
             "delete_event": CONFIRM,
+            "send_message": CONFIRM,
+        },
+        # A ceiling on top of confirmation. `confirm` protects against one
+        # wrong action; it does nothing about thirty, because the human in the
+        # loop is the part that gets tired and starts saying yes.
+        "limits": {
+            "send_message": {"per_minute": 3, "per_hour": 10, "per_day": 30},
         },
     },
     "notifications": {

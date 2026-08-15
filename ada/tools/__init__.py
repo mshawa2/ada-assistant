@@ -2,6 +2,7 @@ from ada.tools import (  # noqa: F401  imported for tool-registration side effec
     calendar_tool,
     drafts,
     heartbeat_control,
+    imessage,
     memory,
     messages,
     notes,

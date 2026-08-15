@@ -4,9 +4,10 @@ lives, so voice and text can never drift apart."""
 
 from collections.abc import Callable
 
-from ada import audit, safety, status
+from ada import audit, limits, safety, status
 from ada.llm import stream_turn
 from ada.tools import call as call_tool, specs as tool_specs
+from ada.tools.registry import get as get_tool
 
 MAX_TOOL_ROUNDS = 8
 
@@ -68,6 +69,22 @@ def _stream(messages: list[dict], on_text: Callable[[str], None], on_status: Cal
 
 
 def _describe_action(name: str, tool_input: dict) -> str:
+    """What the user sees before approving an action.
+
+    A tool may supply its own wording. For anything that reaches another
+    person, the generic `key=value` dump is not good enough — the recipient
+    and the exact text are the whole decision, and they have to be readable
+    at a glance rather than picked out of a repr.
+    """
+    registered = get_tool(name)
+    if registered is not None and registered.confirm_description is not None:
+        try:
+            return registered.confirm_description(tool_input)
+        except Exception:
+            # A broken description must never swallow the gate itself — fall
+            # back to the generic wording rather than skipping confirmation.
+            pass
+
     args = ", ".join(f"{k}={v!r}" for k, v in tool_input.items())
     return f"Ada wants to run '{name}' ({args}). This can't be undone automatically."
 
@@ -100,6 +117,19 @@ def _execute_tool_calls(
             )
             continue
 
+        try:
+            # Ahead of the confirmation prompt on purpose: being over the
+            # ceiling should stop the prompt appearing at all, not hand the
+            # user one more thing to click through.
+            limits.check(block.name)
+        except limits.LimitExceeded as e:
+            on_status(f"blocked: {block.name} hit its rate limit")
+            audit.log("tool_rate_limited", tool=block.name, input=block.input, detail=str(e))
+            results.append(
+                {"type": "tool_result", "tool_use_id": block.id, "content": str(e), "is_error": True}
+            )
+            continue
+
         if safety.requires_confirmation(block.name):
             description = _describe_action(block.name, block.input)
             status.set_pending_confirmation(description)
@@ -123,6 +153,9 @@ def _execute_tool_calls(
         on_status(f"using {block.name}")
         try:
             output = call_tool(block.name, block.input)
+            # Only after it actually ran — a declined or failed action must
+            # never count against the user's ceiling.
+            limits.record(block.name)
             audit.log("tool_call", tool=block.name, input=block.input, result=output)
             results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
         except Exception as e:
