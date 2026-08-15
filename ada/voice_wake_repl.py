@@ -123,6 +123,7 @@ def run() -> None:
                 continue
 
             print(f'you said: "{command}"')
+            ada_status.say("you", command)
             messages.append({"role": "user", "content": command})
             interrupted, reply = run_spoken_turn(messages, interrupt_check=lambda: False, speaking=speaking)
             session.record(messages)

@@ -1,260 +1,317 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ada</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!--
+  One file, no build step, no dependencies — the same choice the first
+  dashboard made, kept because it's still right for something you open on
+  localhost and never deploy.
+
+  The orb is the point. It's driven entirely by the `state` the backend
+  derives (idle / listening / transcribing / thinking / tool / speaking /
+  waiting), so the front end never pattern-matches on prose, and adding a
+  state later means adding a colour here rather than parsing a sentence.
+
+  Everything animates with CSS on a single element rather than a canvas loop:
+  it costs nothing when idle, which matters for a thing meant to sit open on a
+  second screen all day.
+-->
 <style>
   :root {
-    --bg: #14151a;
-    --panel: #1c1e26;
-    --panel-border: #2a2d38;
-    --text: #e8e9ee;
-    --muted: #8a8d9c;
-    --accent: #7c9eff;
-    --urgent: #ff6b6b;
-    --critical: #ff3b3b;
-    --normal: #6b7280;
-    --good: #4ade80;
+    --bg: #07090d;
+    --panel: rgba(255,255,255,.035);
+    --line: rgba(255,255,255,.09);
+    --text: #e8ecf4;
+    --dim: #7d879c;
+    --accent: #4cc2ff;
+    --hot: #ff9d5c;
+    --go: #4ade80;
+    --stop: #f87171;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    padding: 2rem;
-    max-width: 720px;
-    margin: 0 auto;
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 ui-rounded, -apple-system, "SF Pro Text", system-ui, sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    padding: 28px 20px 40px;
   }
-  h1 {
-    font-size: 1.4rem;
-    margin: 0 0 0.25rem 0;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+  body::before {
+    /* A slow wash behind everything so the page feels alive, not static. */
+    content: ""; position: fixed; inset: -30%; z-index: -1; opacity: .5;
+    background: radial-gradient(45% 45% at 50% 30%, rgba(76,194,255,.14), transparent 70%);
+    animation: drift 22s ease-in-out infinite alternate;
   }
-  .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  @keyframes drift { to { transform: translate3d(0, 6%, 0) scale(1.15); } }
 
-  .status-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.5rem; }
-  .dot {
-    width: 10px; height: 10px; border-radius: 50%;
-    background: var(--good);
-    transition: background 0.2s;
-  }
-  .dot.busy { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-  #status-text { font-size: 0.95rem; }
+  header { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+  h1 { font-size: 15px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; margin: 0; color: var(--dim); }
 
-  .banner {
-    background: #3a2a12;
-    border: 1px solid #6b4a1a;
-    color: #ffcf8a;
-    padding: 0.75rem 1rem;
-    border-radius: 8px;
-    margin-bottom: 1.5rem;
-    font-size: 0.9rem;
-    display: none;
+  /* --- the orb --- */
+  .orb-wrap { position: relative; width: 168px; height: 168px; display: grid; place-items: center; margin-bottom: 10px; }
+  .orb {
+    width: 96px; height: 96px; border-radius: 50%;
+    background: radial-gradient(circle at 34% 30%, #fff, var(--accent) 42%, #14526f 100%);
+    box-shadow: 0 0 44px -6px var(--accent), inset 0 0 26px rgba(255,255,255,.32);
+    transition: background .5s ease, box-shadow .5s ease, transform .3s ease;
   }
-  .banner.show { display: block; }
+  .ring {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 1px solid var(--accent); opacity: 0; pointer-events: none;
+  }
+  /* idle: a slow breath, so it reads as awake but not doing anything */
+  [data-state="idle"] .orb { animation: breathe 5s ease-in-out infinite; }
+  @keyframes breathe { 50% { transform: scale(1.05); } }
 
-  .panel {
-    background: var(--panel);
-    border: 1px solid var(--panel-border);
-    border-radius: 10px;
-    padding: 1rem 1.2rem;
-    margin-bottom: 1.2rem;
-  }
-  .panel h2 {
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--muted);
-    margin: 0 0 0.8rem 0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+  /* listening: rings pushing outward, like it's reaching for sound */
+  [data-state="listening"] .ring { animation: sonar 2s ease-out infinite; }
+  [data-state="listening"] .ring:nth-child(2) { animation-delay: .66s; }
+  [data-state="listening"] .ring:nth-child(3) { animation-delay: 1.32s; }
+  @keyframes sonar {
+    0% { transform: scale(.55); opacity: .55; }
+    100% { transform: scale(1.1); opacity: 0; }
   }
 
-  .heartbeat-toggle {
-    background: var(--panel-border);
-    color: var(--text);
-    border: none;
-    border-radius: 6px;
-    padding: 0.3rem 0.7rem;
-    font-size: 0.75rem;
-    cursor: pointer;
-  }
-  .heartbeat-toggle:hover { background: var(--accent); color: #fff; }
+  /* thinking / transcribing: tighter, faster, a bit impatient */
+  [data-state="thinking"] .orb, [data-state="transcribing"] .orb { animation: think .9s ease-in-out infinite; }
+  @keyframes think { 50% { transform: scale(.9); filter: brightness(1.3); } }
 
-  .notice {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 0.75rem;
-    padding: 0.6rem 0;
-    border-bottom: 1px solid var(--panel-border);
-    font-size: 0.88rem;
+  /* using a tool: warm, and the tool is named underneath */
+  [data-state="tool"] .orb {
+    background: radial-gradient(circle at 34% 30%, #fff, var(--hot) 42%, #6b3418 100%);
+    box-shadow: 0 0 44px -6px var(--hot), inset 0 0 26px rgba(255,255,255,.32);
+    animation: think .7s ease-in-out infinite;
   }
-  .notice:last-child { border-bottom: none; }
-  .notice .badge {
-    font-size: 0.65rem;
-    text-transform: uppercase;
-    padding: 0.1rem 0.4rem;
-    border-radius: 4px;
-    flex-shrink: 0;
-    margin-top: 0.1rem;
-  }
-  .badge.normal { background: var(--normal); }
-  .badge.urgent { background: var(--urgent); color: #2a0000; }
-  .badge.critical { background: var(--critical); color: #fff; }
-  .notice .text { flex: 1; }
-  .notice button {
-    background: none;
-    border: 1px solid var(--panel-border);
-    color: var(--muted);
-    border-radius: 5px;
-    padding: 0.15rem 0.5rem;
-    cursor: pointer;
-    font-size: 0.75rem;
-  }
-  .notice button:hover { border-color: var(--accent); color: var(--accent); }
 
-  .empty { color: var(--muted); font-size: 0.85rem; font-style: italic; }
-
-  .activity-item {
-    padding: 0.4rem 0;
-    border-bottom: 1px solid var(--panel-border);
-    font-size: 0.82rem;
-    color: var(--muted);
-    font-family: ui-monospace, monospace;
+  /* speaking: the bars, which is the one moment you want to look at it */
+  [data-state="speaking"] .orb { animation: none; transform: scale(.8); }
+  .bars { position: absolute; display: none; gap: 5px; align-items: center; height: 66px; }
+  [data-state="speaking"] .bars { display: flex; }
+  .bars i {
+    display: block; width: 5px; border-radius: 3px; background: var(--accent);
+    animation: talk .62s ease-in-out infinite; height: 18px;
   }
-  .activity-item:last-child { border-bottom: none; }
-  .activity-item .event-type { color: var(--accent); }
+  .bars i:nth-child(2){animation-delay:.09s} .bars i:nth-child(3){animation-delay:.18s}
+  .bars i:nth-child(4){animation-delay:.27s} .bars i:nth-child(5){animation-delay:.36s}
+  .bars i:nth-child(6){animation-delay:.45s} .bars i:nth-child(7){animation-delay:.54s}
+  @keyframes talk { 50% { height: 58px; } }
+
+  /* waiting on you: red, insistent, impossible to mistake for working */
+  [data-state="waiting"] .orb {
+    background: radial-gradient(circle at 34% 30%, #fff, var(--stop) 42%, #6b1c1c 100%);
+    box-shadow: 0 0 54px -4px var(--stop), inset 0 0 26px rgba(255,255,255,.32);
+    animation: urgent .8s ease-in-out infinite;
+  }
+  @keyframes urgent { 50% { transform: scale(1.09); } }
+
+  .state-label { color: var(--dim); font-size: 13px; letter-spacing: .1em; min-height: 20px; }
+  .state-label b { color: var(--hot); font-weight: 600; }
+
+  main { width: 100%; max-width: 720px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; margin-top: 16px; }
+  .panel h2 { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin: 0 0 12px; font-weight: 600; }
+
+  /* --- conversation --- */
+  #chat { display: flex; flex-direction: column; gap: 14px; max-height: 46vh; overflow-y: auto; }
+  .turn { display: grid; grid-template-columns: 46px 1fr; gap: 12px; }
+  .who { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); padding-top: 3px; }
+  .said { white-space: pre-wrap; word-break: break-word; }
+  .turn.you .said { color: #b9c4d8; }
+  .cursor::after {
+    content: "\258C"; color: var(--accent); animation: blink 1s steps(2) infinite; margin-left: 1px;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .empty { color: var(--dim); font-style: italic; }
+
+  /* --- confirmation --- */
+  #confirm { display: none; border-color: rgba(248,113,113,.5); background: rgba(248,113,113,.07); }
+  #confirm.show { display: block; }
+  #confirm h2 { color: var(--stop); }
+  #confirm pre { white-space: pre-wrap; word-break: break-word; margin: 0 0 14px; font: inherit; }
+  .buttons { display: flex; gap: 10px; }
+  button {
+    font: inherit; font-weight: 600; padding: 9px 18px; border-radius: 10px;
+    border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--text); cursor: pointer;
+  }
+  button:hover { background: rgba(255,255,255,.12); }
+  button.go { background: rgba(74,222,128,.16); border-color: rgba(74,222,128,.45); color: var(--go); }
+  button.stop { background: rgba(248,113,113,.16); border-color: rgba(248,113,113,.45); color: var(--stop); }
+
+  /* --- notices + activity --- */
+  .notice { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-top: 1px solid var(--line); }
+  .notice:first-of-type { border-top: 0; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 7px; flex: none; background: var(--dim); }
+  .dot.urgent { background: var(--hot); } .dot.critical { background: var(--stop); }
+  .notice button { padding: 3px 10px; font-size: 12px; font-weight: 500; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  #activity { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--dim); max-height: 168px; overflow-y: auto; }
+  #activity div { padding: 2px 0; }
+  .muted { color: var(--dim); font-size: 13px; }
+  footer { color: var(--dim); font-size: 12px; margin-top: 22px; }
 </style>
 </head>
-<body>
-  <h1>🪄 Ada</h1>
-  <div class="subtitle">local dashboard — glance, don't grep</div>
+<body data-state="idle">
 
-  <div class="status-row">
-    <div class="dot" id="status-dot"></div>
-    <div id="status-text">idle</div>
-  </div>
+<header><h1>Ada</h1></header>
 
-  <div class="banner" id="pending-banner"></div>
+<div class="orb-wrap">
+  <div class="ring"></div><div class="ring"></div><div class="ring"></div>
+  <div class="orb"></div>
+  <div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+</div>
+<div class="state-label" id="state-label">idle</div>
 
-  <div class="panel">
-    <h2>
-      Heartbeat
-      <button class="heartbeat-toggle" id="heartbeat-toggle">…</button>
-    </h2>
-    <div id="heartbeat-state" class="empty">checking…</div>
-  </div>
+<main>
+  <section class="panel" id="confirm">
+    <h2>Waiting for you</h2>
+    <pre id="confirm-text"></pre>
+    <div class="buttons">
+      <button class="go" id="approve">Approve</button>
+      <button class="stop" id="decline">Decline</button>
+    </div>
+    <p class="muted" style="margin:12px 0 0">You can also answer in the terminal — whichever comes first.</p>
+  </section>
 
-  <div class="panel">
-    <h2>Notices</h2>
-    <div id="notices"><div class="empty">Loading…</div></div>
-  </div>
+  <section class="panel">
+    <h2>Conversation</h2>
+    <div id="chat"><div class="empty">Say &ldquo;Ada&rdquo; to start, or type in the terminal.</div></div>
+  </section>
 
-  <div class="panel">
-    <h2>Recent activity</h2>
-    <div id="activity"><div class="empty">Loading…</div></div>
-  </div>
+  <section class="panel">
+    <div class="row" style="margin-bottom:12px">
+      <h2 style="margin:0">Noticed</h2>
+      <button id="heartbeat-toggle">&hellip;</button>
+    </div>
+    <div id="notices"><p class="muted">Nothing to report.</p></div>
+  </section>
+
+  <section class="panel">
+    <h2>Activity</h2>
+    <div id="activity"></div>
+  </section>
+</main>
+
+<footer>Local only &middot; 127.0.0.1:4173</footer>
 
 <script>
-async function refreshStatus() {
-  const r = await fetch('/api/status');
-  const data = await r.json();
-  const dot = document.getElementById('status-dot');
-  const text = document.getElementById('status-text');
-  text.textContent = data.status;
-  dot.className = 'dot' + (data.status !== 'idle' ? ' busy' : '');
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => (
+  {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-  const banner = document.getElementById('pending-banner');
-  if (data.pending_confirmation) {
-    banner.textContent = '⏳ Waiting for you to answer in the terminal: ' + data.pending_confirmation;
-    banner.classList.add('show');
-  } else {
-    banner.classList.remove('show');
+let pendingId = null;
+let lastChat = "";
+
+async function get(url) {
+  try { const r = await fetch(url); return r.ok ? await r.json() : null; }
+  catch { return null; }
+}
+
+function renderState(snap) {
+  document.body.dataset.state = snap.state || "idle";
+  $("state-label").innerHTML = snap.tool
+    ? `using <b>${esc(snap.tool)}</b>`
+    : esc(snap.status || "idle");
+}
+
+function renderChat(turns) {
+  // Cheap identity check: re-rendering every poll would fight text selection
+  // and reset scroll while you're reading.
+  const key = JSON.stringify(turns);
+  if (key === lastChat) return;
+  lastChat = key;
+
+  const chat = $("chat");
+  if (!turns.length) {
+    chat.innerHTML = '<div class="empty">Say &ldquo;Ada&rdquo; to start, or type in the terminal.</div>';
+    return;
   }
+  const nearBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 60;
+  chat.innerHTML = turns.map(t => `
+    <div class="turn ${t.role === "ada" ? "ada" : "you"}">
+      <div class="who">${t.role === "ada" ? "ada" : "you"}</div>
+      <div class="said ${t.streaming ? "cursor" : ""}">${esc(t.text)}</div>
+    </div>`).join("");
+  if (nearBottom) chat.scrollTop = chat.scrollHeight;
+}
+
+function renderConfirm(p) {
+  const box = $("confirm");
+  if (!p) { box.classList.remove("show"); pendingId = null; return; }
+  pendingId = p.id;
+  $("confirm-text").textContent = p.description;
+  box.classList.add("show");
+}
+
+async function answer(approved) {
+  if (pendingId === null) return;
+  const id = pendingId;
+  pendingId = null;
+  $("confirm").classList.remove("show");   // respond instantly; the poll confirms
+  await fetch("/api/confirm", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({id, approved})
+  });
+}
+$("approve").onclick = () => answer(true);
+$("decline").onclick = () => answer(false);
+document.addEventListener("keydown", (e) => {
+  if (pendingId === null) return;
+  const k = e.key.toLowerCase();
+  if (k === "y") answer(true);
+  if (k === "n" || e.key === "Escape") answer(false);
+});
+
+async function refreshStatus() {
+  const snap = await get("/api/status");
+  if (!snap) { $("state-label").textContent = "not running"; return; }
+  renderState(snap);
+  renderChat(snap.transcript || []);
+  renderConfirm(snap.pending);
+}
+
+async function refreshNotices() {
+  const list = await get("/api/notices");
+  if (!list) return;
+  $("notices").innerHTML = list.length
+    ? list.map(n => `
+        <div class="notice">
+          <span class="dot ${esc(n.level)}"></span>
+          <span style="flex:1">${esc(n.text)}</span>
+          <button onclick="dismiss(${n.id})">dismiss</button>
+        </div>`).join("")
+    : '<p class="muted">Nothing to report.</p>';
+}
+async function dismiss(id) {
+  await fetch(`/api/notices/${id}/dismiss`, {method: "POST"});
+  refreshNotices();
 }
 
 async function refreshHeartbeat() {
-  const r = await fetch('/api/heartbeat');
-  const data = await r.json();
-  const stateEl = document.getElementById('heartbeat-state');
-  const toggle = document.getElementById('heartbeat-toggle');
-  stateEl.textContent = data.paused ? 'Paused — background checks are not running.' : 'Running normally.';
-  stateEl.className = data.paused ? '' : 'empty';
-  toggle.textContent = data.paused ? 'Resume' : 'Pause';
-  toggle.onclick = async () => {
-    await fetch(data.paused ? '/api/heartbeat/resume' : '/api/heartbeat/pause', { method: 'POST' });
+  const hb = await get("/api/heartbeat");
+  if (!hb) return;
+  const b = $("heartbeat-toggle");
+  b.textContent = hb.paused ? "paused — resume" : "watching — pause";
+  b.onclick = async () => {
+    await fetch(`/api/heartbeat/${hb.paused ? "resume" : "pause"}`, {method: "POST"});
     refreshHeartbeat();
   };
 }
 
-async function refreshNotices() {
-  const r = await fetch('/api/notices');
-  const notices = await r.json();
-  const el = document.getElementById('notices');
-  if (!notices.length) {
-    el.innerHTML = '<div class="empty">Nothing noticed right now.</div>';
-    return;
-  }
-  el.innerHTML = notices.map(n => `
-    <div class="notice">
-      <span class="badge ${n.level}">${n.level}</span>
-      <span class="text">${escapeHtml(n.text)}</span>
-      <button data-id="${n.id}">dismiss</button>
-    </div>
-  `).join('');
-  el.querySelectorAll('button[data-id]').forEach(btn => {
-    btn.onclick = async () => {
-      await fetch(`/api/notices/${btn.dataset.id}/dismiss`, { method: 'POST' });
-      refreshNotices();
-    };
-  });
-}
-
 async function refreshActivity() {
-  const r = await fetch('/api/activity');
-  const entries = await r.json();
-  const el = document.getElementById('activity');
-  if (!entries.length) {
-    el.innerHTML = '<div class="empty">No activity logged yet.</div>';
-    return;
-  }
-  el.innerHTML = entries.map(e => {
-    const time = new Date(e.time * 1000).toLocaleTimeString();
-    const detail = summarize(e);
-    return `<div class="activity-item">${time} — <span class="event-type">${e.event}</span> ${escapeHtml(detail)}</div>`;
-  }).join('');
+  const rows = await get("/api/activity");
+  if (!rows) return;
+  $("activity").innerHTML = rows.map(r => {
+    const t = new Date((r.time || 0) * 1000).toLocaleTimeString();
+    return `<div>${esc(t)}  ${esc(r.tool || r.event || "")}</div>`;
+  }).join("");
 }
 
-function summarize(e) {
-  if (e.event === 'tool_call') return e.tool + (e.error ? ` (error: ${e.error})` : '');
-  if (e.event === 'confirmation_requested') return `${e.tool} — ${e.approved ? 'approved' : 'declined'}`;
-  if (e.event === 'heartbeat_notice') return `[${e.level}] ${e.text}`;
-  if (e.event === 'model_call') return `${e.input_tokens} in / ${e.output_tokens} out`;
-  return '';
-}
-
-function escapeHtml(s) {
-  const div = document.createElement('div');
-  div.textContent = s ?? '';
-  return div.innerHTML;
-}
-
-function refreshAll() {
-  refreshStatus();
-  refreshHeartbeat();
-  refreshNotices();
-  refreshActivity();
-}
-
-refreshAll();
-setInterval(refreshAll, 1500);
+// Status is what the orb rides on, so it's polled hard; the rest is calmer.
+refreshStatus(); setInterval(refreshStatus, 400);
+refreshNotices(); refreshHeartbeat(); refreshActivity();
+setInterval(() => { refreshNotices(); refreshHeartbeat(); refreshActivity(); }, 4000);
 </script>
 </body>
 </html>

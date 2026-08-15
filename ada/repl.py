@@ -1,6 +1,6 @@
 import threading
 
-from ada import agent, cost, session
+from ada import agent, confirm, cost, session
 from ada import status as ada_status
 from ada.face import server as face_server
 from ada.heartbeat import loop as heartbeat_loop
@@ -9,12 +9,9 @@ from ada.llm import LLMError
 
 
 def _confirm(message: str) -> bool:
-    try:
-        answer = input(f"\n[confirm] {message} [y/N] ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        # No one there to answer — fail safe: decline, don't hang or crash.
-        return False
-    return answer in ("y", "yes")
+    # Answerable from the terminal or the browser, whichever comes first.
+    # See ada/confirm.py — it still fails safe with nobody there.
+    return confirm.ask(message)
 
 
 def _print_cost_summary() -> None:
@@ -58,16 +55,21 @@ def run() -> None:
         if user_input.lower() == "reset":
             messages.clear()
             session.clear()
+            ada_status.clear_transcript()
             print("[fresh conversation — what I remember about you is untouched]\n")
             continue
 
         start_len = len(messages)
         messages.append({"role": "user", "content": user_input})
+        ada_status.say("you", user_input)
         print("ada> ", end="", flush=True)
         ada_status.set_status("thinking...")
 
+        ada_status.begin_reply()
+
         def on_text(chunk: str) -> None:
             print(chunk, end="", flush=True)
+            ada_status.stream(chunk)
 
         def on_status(status_text: str) -> None:
             print(f"\n  [{status_text}]", flush=True)
@@ -82,5 +84,6 @@ def run() -> None:
             # half-finished exchange the model never actually answered.
             del messages[start_len:]
         finally:
+            ada_status.end_reply()
             session.record(messages)
             ada_status.set_status("idle")

@@ -427,14 +427,9 @@ Ada keeps working; the dashboard is a nice-to-have, never load-bearing.
   doing right now" string (`idle` / `thinking...` / `using <tool>` /
   `listening...` / `speaking...`), set by the REPLs and by `agent.py`'s
   `on_status` callback, read by the dashboard.
-- **Confirmation visibility, deliberately not resolution:** when the gate from
-  Tier 6 is waiting on an answer, `status.py`'s `pending_confirmation` field is
-  set to the action description and the dashboard shows a banner —
-  *"Waiting for you to answer in the terminal: ..."*. The actual yes/no still
-  only happens in the terminal; making it clickable from the browser too would
-  need real cross-thread signaling between a blocking `input()` and an async
-  web click, which felt like a second feature, not part of "build the face."
-  Left as a clearly-labeled next step, not silently skipped.
+- **Confirmation visibility, later made resolution.** This tier could only
+  *show* a pending confirmation; answering it still meant the terminal. That
+  gap is now closed — see "The face, made an interface" below.
 - **Bug found and fixed during verification:** closing stdin mid-confirmation
   (nobody there to answer) crashed the whole app with an unhandled `EOFError`
   out of `input()` — a real gap in Tier 6's "never block forever waiting on a
@@ -1211,6 +1206,58 @@ while the real call raised `AttributeError` immediately. Same shape as the
 AppleScript `kind` bug. There's now a test asserting the fake store defines no
 method that `EKEventStore` doesn't have, so the fake can't drift into
 validating an API that isn't there.
+
+## The face, made an interface (built and verified)
+
+The dashboard was 260 lines of read-only monitor: a status dot, notices, an
+activity tail. You couldn't talk to Ada in it, and a confirmation appeared
+there but could only be answered in the terminal. Asked for something closer to
+a Jarvis-style presence, the shape that follows is a **companion display for
+the voice loop** rather than a chat client — Ada is already wake-word-driven,
+so the interface's job is to show what she's doing and let you approve things,
+not to be another place to type.
+
+- **An orb that reads at a glance.** Its state comes from `status.py`, which
+  now *derives* a coarse state (idle / listening / transcribing / thinking /
+  tool / speaking / waiting) from the status strings the REPLs already emit. The
+  front end never pattern-matches on prose, so adding a state later means adding
+  a colour, not parsing a sentence. Waiting-on-a-human deliberately outranks
+  everything: the orb must never look busy while it's actually blocked on you.
+- **The conversation, streaming.** `status.py` keeps a bounded display buffer —
+  deliberately *not* the durable transcript, which stays in `data/session.json`.
+  Two stores with different jobs beats one doing both badly, and a display
+  buffer has no business surviving a restart. A reply that errors before
+  producing text is dropped rather than left as a blank bubble with a cursor.
+- **Confirmations are now answerable from the browser**, which closes the gap
+  the face tier recorded and deferred. The trick is that it's a **race, not a
+  handover**: a `Pending` carries an Event, and whoever answers first — click or
+  keypress — wins. The Tier 6 gate above is untouched; it still just calls a
+  function that returns True or False, and still declines if nobody answers.
+- **Why not read stdin on a thread.** The obvious implementation is worse than
+  it looks: that thread stays blocked after the browser answers and then eats
+  the next line you type as if it were the answer to a settled question. So
+  `ada/confirm.py` *polls* stdin with `select`, checking each round whether the
+  browser got there first, and stops touching stdin the moment it did.
+- **The id is checked on every answer.** A stale tab clicking "approve" after
+  the question changed would otherwise approve the *new* action — exactly what
+  a gate exists to prevent.
+- `ada/confirm.py` also removes the duplicated `_confirm` that both `repl.py`
+  and `voice_turn.py` carried. Voice still speaks the question and still takes
+  the answer typed or clicked, never spoken — a misheard "yes" on a safety gate
+  was rejected in Tier 6 and still is.
+
+**Verified** against the real server on 127.0.0.1:4173 over actual HTTP: the
+page serves, the orb moved `idle → tool` across a real turn, both turns landed
+in the transcript with the reply streaming in, and the confirmation race worked
+end to end — a blocked agent thread, the orb showing `waiting`, the browser
+reading the description, a click returning `{"ok": true}`, the agent unblocking
+with `True`, and a second stale click correctly refused as *"already answered or
+expired"*. 484/484 tests pass.
+
+**Still not independently verified:** how the page actually *looks*. The
+sandboxed browser here can't reach localhost — the same environment limit the
+first face tier recorded. Every endpoint it calls is verified; open
+`http://127.0.0.1:4173` to judge the rest.
 
 ## Consolidation notes
 

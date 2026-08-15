@@ -69,6 +69,7 @@ def run() -> None:
 
             print(f'you said: "{text}"\n')
 
+            ada_status.say("you", text)
             messages.append({"role": "user", "content": text})
             interrupted, _reply = run_spoken_turn(messages, enter_pressed, speaking)
             session.record(messages)

@@ -9,7 +9,7 @@ import re
 import threading
 from collections.abc import Callable
 
-from ada import agent
+from ada import agent, confirm as confirm_module
 from ada import interrupt as ada_interrupt
 from ada import status as ada_status
 from ada.llm import LLMError
@@ -19,18 +19,16 @@ _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 def confirm(message: str) -> bool:
-    # Spoken heads-up, but the actual yes/no is typed — unambiguous, no STT
-    # guessing on a safety-critical gate.
-    print(f"\n[confirm] {message}")
-    try:
-        speak(f"{message} Type y or n to confirm.", should_stop=ada_interrupt.requested)
-    except TTSError as e:
-        print(f"[voice error: {e}]")
-    try:
-        answer = input("[y/N] ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        return False
-    return answer in ("y", "yes")
+    """Spoken heads-up, but the answer is typed or clicked — never spoken.
+
+    A misheard "yes" is not a risk worth taking on a safety gate; that was a
+    deliberate Tier 6 decision and it still holds now the browser can answer.
+    """
+
+    def announce(text: str) -> None:
+        speak(f"{text} Confirm in the terminal or the browser.", should_stop=ada_interrupt.requested)
+
+    return confirm_module.ask(message, speak=announce)
 
 
 def run_spoken_turn(
@@ -61,6 +59,7 @@ def run_spoken_turn(
         print(chunk, end="", flush=True)
         buffer += chunk
         full_reply += chunk
+        ada_status.stream(chunk)
         parts = _SENTENCE_END.split(buffer)
         if len(parts) > 1:
             for sentence in parts[:-1]:
@@ -76,6 +75,7 @@ def run_spoken_turn(
 
     print("ada> ", end="", flush=True)
     ada_status.set_status("thinking...")
+    ada_status.begin_reply()
     try:
         agent.run_turn(messages, on_text, on_status, confirm)
         if buffer.strip() and not interrupted.is_set():
@@ -85,6 +85,7 @@ def run_spoken_turn(
         print(f"\n[{e}]\n")
         del messages[start_len:]
 
+    ada_status.end_reply()
     ada_status.set_status("speaking...")
     speech_queue.put(None)
     while worker.is_alive():

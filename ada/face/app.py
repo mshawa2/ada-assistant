@@ -1,6 +1,20 @@
+"""The face's HTTP surface.
+
+Was a read-only dashboard. It's now what the interface talks to, which means
+one new thing that matters: `/api/confirm` lets a click answer a confirmation
+the terminal is also waiting on. See `ada/confirm.py` for why that's a race
+rather than a handover.
+
+Everything here is local-only and unauthenticated, which is fine for a server
+bound to 127.0.0.1 — but it's the reason `/api/confirm` takes the
+confirmation's id. A stale tab clicking "approve" after the question changed
+would otherwise approve the *new* question, which is exactly the sort of thing
+a gate exists to prevent.
+"""
+
 from pathlib import Path
 
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 
 from ada import audit, status
 from ada.heartbeat.kill_switch import is_paused, set_paused
@@ -18,12 +32,25 @@ def index():
 
 @app.route("/api/status")
 def api_status():
-    return jsonify(
-        {
-            "status": status.get_status(),
-            "pending_confirmation": status.get_pending_confirmation(),
-        }
-    )
+    """Everything the face animates against, in one poll."""
+    return jsonify(status.snapshot())
+
+
+@app.route("/api/confirm", methods=["POST"])
+def api_confirm():
+    """Answer a pending confirmation from the browser.
+
+    The id is required and checked: whoever clicks is answering *that*
+    question, not whatever happens to be pending by the time it arrives.
+    """
+    payload = request.get_json(silent=True) or {}
+    try:
+        confirmation_id = int(payload.get("id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "reason": "no confirmation id"}), 400
+
+    answered = status.answer_pending(confirmation_id, bool(payload.get("approved")))
+    return jsonify({"ok": answered, "reason": "" if answered else "already answered or expired"})
 
 
 @app.route("/api/notices")
