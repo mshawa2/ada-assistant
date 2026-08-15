@@ -39,7 +39,8 @@
       "send_message": "confirm",
       "mark_email_read": "confirm",
       "archive_email": "confirm",
-      "reply_email": "confirm"
+      "reply_email": "confirm",
+      "run_shortcut": "confirm"
     },
     "limits": {
       "send_message": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
@@ -49,6 +50,10 @@
       "search_email": { "per_minute": 10 },
       "read_email": { "per_minute": 20 }
     }
+  },
+
+  "home": {
+    "confirm_domains": ["lock", "cover", "alarm_control_panel", "climate", "water_heater"]
   },
 
   "email": {

@@ -68,6 +68,25 @@ def _stream(messages: list[dict], on_text: Callable[[str], None], on_status: Cal
         return final_message
 
 
+def _tool_asks_to_confirm(name: str, tool_input: dict) -> bool:
+    """Whether a tool wants *this particular call* confirmed.
+
+    Autonomy is per tool, but risk isn't always: "unlock the front door" and
+    "turn off the lamp" are the same tool. A tool spanning risk levels supplies
+    a predicate over its own arguments.
+
+    A predicate that raises is treated as "confirm". Failing towards asking is
+    the only safe direction when the thing that decides has itself broken.
+    """
+    registered = get_tool(name)
+    if registered is None or registered.confirm_when is None:
+        return False
+    try:
+        return bool(registered.confirm_when(tool_input))
+    except Exception:
+        return True
+
+
 def _describe_action(name: str, tool_input: dict) -> str:
     """What the user sees before approving an action.
 
@@ -130,7 +149,7 @@ def _execute_tool_calls(
             )
             continue
 
-        if safety.requires_confirmation(block.name):
+        if safety.requires_confirmation(block.name) or _tool_asks_to_confirm(block.name, block.input):
             description = _describe_action(block.name, block.input)
             status.set_pending_confirmation(description)
             try:

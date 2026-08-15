@@ -9,6 +9,7 @@ class Tool:
     input_schema: dict
     func: Callable[..., str]
     confirm_description: Optional[Callable[[dict], str]] = None
+    confirm_when: Optional[Callable[[dict], bool]] = None
 
 
 _registry: dict[str, Tool] = {}
@@ -19,6 +20,7 @@ def tool(
     description: str,
     input_schema: dict,
     confirm_description: Optional[Callable[[dict], str]] = None,
+    confirm_when: Optional[Callable[[dict], bool]] = None,
 ):
     """Decorator that registers a function as a tool the model can call.
 
@@ -31,6 +33,14 @@ def tool(
     full text are the entire decision, and they need to be readable at a
     glance. A tool that can do something irreversible to someone else should
     say so in its own words.
+
+    `confirm_when` decides per *call* rather than per tool. Autonomy levels
+    can't express "confirm the front door but not the lamp" — that depends on
+    the arguments, not the tool. A tool that spans risk levels supplies a
+    predicate over its own input.
+
+    It can only ever *add* confirmation. If autonomy already says confirm,
+    this can't take it away — the mechanism tightens, never loosens.
     """
 
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
@@ -40,6 +50,7 @@ def tool(
             input_schema=input_schema,
             func=func,
             confirm_description=confirm_description,
+            confirm_when=confirm_when,
         )
         return func
 

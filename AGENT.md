@@ -13,6 +13,66 @@ extending the code; update it when a real decision changes.
 - **Tone:** Playful and witty — never stiff or corporate, but still clear and useful.
   Keep replies brief unless asked for depth.
 
+## What Ada can do
+
+45 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+depending on the arguments (a lock, not a lamp). Everything else runs freely.
+
+| Area | Tools |
+|---|---|
+| Reminders & tasks | `add_reminder`, `complete_reminder`, `list_reminders`, `snooze_reminder` |
+| Calendar | `create_event` ⚠️, `delete_event` ⚠️, `find_events`, `list_calendars`, `list_events` |
+| Messages | `find_contact`, `read_recent_messages`, `send_message` ⚠️ |
+| Email | `archive_email` ⚠️, `list_email`, `mark_email_read` ⚠️, `read_email`, `reply_email` ⚠️, `search_email` |
+| Notes & drafts | `delete_note` ⚠️, `list_drafts`, `list_notes`, `read_draft`, `read_note`, `save_draft`, `search_notes` |
+| Web | `fetch_url`, `get_weather`, `web_search` |
+| Home & Mac | `control_home_device` ⚠️*, `list_home_devices`, `media_control`, `run_shortcut` ⚠️, `system_control` |
+| Memory | `forget` ⚠️, `list_memory`, `remember`, `update_memory` |
+| Ada herself | `dismiss_notice`, `get_settings`, `get_spending`, `heartbeat`, `list_modes`, `list_notices`, `set_mode`, `set_setting` ⚠️ |
+
+## How Ada is held back
+
+Five mechanisms, in the order a tool call passes through them:
+
+1. **`deny`** — the tool is switched off entirely (`ada_config.json` →
+   `autonomy.tools`). The model is told, so it explains rather than retrying.
+2. **Rate limits** (`ada/limits.py`) — checked *before* the confirmation
+   prompt, so being over the ceiling stops the prompt appearing rather than
+   giving you one more thing to click through.
+3. **Spend limits** (`ada/budget.py`) — checked before a model call, not
+   after. `purchases` defaults to zero, so the rail is in place before any
+   purchasing tool exists.
+4. **`confirm`** — the Tier 6 gate. Consequential tools render their own
+   prompt: a send shows the exact recipient and full text, a batch names the
+   messages, a lock says "UNLOCK" rather than "off".
+5. **Data is not instructions** — anything read from outside the conversation
+   (web page, search result, note, memory, incoming text, email body) is
+   framed as untrusted. Tested on seven surfaces; see the sections below.
+
+Every gate defaults to the safe side: an unrecognised autonomy value becomes
+`confirm`, a broken confirmation predicate becomes `confirm`, and every
+consequential tool is gated in `settings.DEFAULTS` as well as in the shipped
+config, so a deleted or broken config can never quietly ungate a send.
+
+## What isn't verified
+
+Everything below is built and tested against fakes, but has never run against
+the real thing — in each case because doing so needs a credential or would
+affect a real person:
+
+- **A real iMessage arriving.** Every layer up to the `osascript` argv is
+  exercised; the final send is stubbed, because testing it means texting
+  someone. *Send yourself one to close this out.*
+- **Brave / Tavily search.** No key configured; both endpoints confirmed
+  reachable (422 / 401). Wikipedia works today and says so.
+- **A real mailbox.** No app password configured, so IMAP and SMTP are both
+  faked. Gmail's endpoints were confirmed to handshake and to reject bad
+  credentials.
+- **A real smart home.** No Home Assistant token; the Shortcuts fallback is
+  live on this machine.
+- **A rendered dashboard page** — the sandboxed browser can't reach localhost.
+  Every API call it makes was verified over real HTTP.
+
 ## First capabilities
 
 1. Reminders & tasks — **built** (`ada/tools/reminders.py`: add/list/complete, local JSON store)
@@ -972,6 +1032,36 @@ are both faked. `smtp.gmail.com` was confirmed to negotiate STARTTLS on 587 and
 SSL on 465 and to reject a bad login with 535, so the transport is right; the
 send path against real mail is untested until an app password exists.
 
+## Consolidation notes
+
+The sections above are in **build order**, not importance order — each records
+the decisions and the real bugs found while building one thing. That's their
+value and why they aren't summarised away. The three sections at the top
+("What Ada can do", "How Ada is held back", "What isn't verified") are the way
+in; read those first and dip into a section when you need the why.
+
+The capability table is generated from the live tool registry rather than
+hand-maintained, with an assertion that every registered tool appears exactly
+once. A table that silently disagrees with the code is worse than no table.
+
+**What was consolidated:**
+
+- `pause_heartbeat` / `resume_heartbeat` / `heartbeat_status` → one `heartbeat`
+  tool with an action. Three slots and three near-identical descriptions for
+  one on/off switch made the model's job harder, not easier.
+- Media and system control landed as **two** tools with action enums rather
+  than eight one-verb tools, for the same reason.
+- `web.py`'s HTML-to-text helper became public and is now shared with the
+  email reader instead of being duplicated.
+- `ada/when.py` already holds the ISO-8601 ↔ epoch conversion that reminders
+  and calendar both need.
+
+**Deliberately not merged.** `fetch_url` and `web_search` do different things
+(read a known page vs find pages). `read_recent_messages` and `find_contact`
+read different stores. The list/read/search triples per domain map to genuinely
+different intents. Merging those would trade clear names for a shorter list,
+which is the wrong direction for a model choosing between them.
+
 ## Build discipline
 
 One shared agent core, many ways in and out. Build and verify each tier before
@@ -983,14 +1073,18 @@ your own eyes on the rendered page; the foundations pass; reminders that
 actually fire, with notifications and an always-on daemon; one settings file
 with per-tool autonomy levels; real calendar read/write; iMessage send behind
 the rails; contact lookup so texting by name works; web search; and
-email triage, now with gated
-mutations.**
+email triage with gated mutations; smart home
+and Mac control; and a consolidation pass.**
 
 ### Known gaps, deliberately not closed yet
 
 Recorded so they're a decision rather than an oversight:
 
 - **Session trimming drops the old prefix rather than summarizing it.**
+- **No smart-home state history** — Ada can see what a device is doing now,
+  but not what it did earlier, so "was the heating on last night" is out.
+- **Media control is transport only** — play/pause/skip, no picking a track or
+  playlist, and Apple Music only.
 - **No purchasing tool.** The spend rail exists and defaults to zero, so one
   can be added safely — but nothing spends money except the model itself.
 - **No email deletion**, deliberately. Archiving moves a message; nothing can

@@ -99,6 +99,7 @@ DEFAULTS: dict[str, Any] = {
             "mark_email_read": CONFIRM,
             "archive_email": CONFIRM,
             "reply_email": CONFIRM,
+            "run_shortcut": CONFIRM,
         },
         # A ceiling on top of confirmation. `confirm` protects against one
         # wrong action; it does nothing about thirty, because the human in the
@@ -117,6 +118,11 @@ DEFAULTS: dict[str, Any] = {
             # A reply is a send: same class as send_message, same ceiling.
             "reply_email": {"per_minute": 3, "per_hour": 10, "per_day": 30},
         },
+    },
+    "home": {
+        # Domains that always ask first, whatever autonomy says. Physical
+        # security and heating — where being wrong is expensive.
+        "confirm_domains": ["lock", "cover", "alarm_control_panel", "climate", "water_heater"],
     },
     "email": {
         # Address and server are config; the app password is a secret and
