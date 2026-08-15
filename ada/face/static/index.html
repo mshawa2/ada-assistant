@@ -84,8 +84,11 @@
     animation: think .7s ease-in-out infinite;
   }
 
-  /* speaking: the bars, which is the one moment you want to look at it */
-  [data-state="speaking"] .orb { animation: none; transform: scale(.8); }
+  /* speaking: the bars, which is the one moment you want to look at it.
+     The orb drops right back and dims to a glow — at full strength the bars
+     sat on top of it and the whole thing read as a muddle rather than a
+     waveform. */
+  [data-state="speaking"] .orb { animation: none; transform: scale(.42); opacity: .3; filter: blur(6px); }
   .bars { position: absolute; display: none; gap: 5px; align-items: center; height: 66px; }
   [data-state="speaking"] .bars { display: flex; }
   .bars i {
