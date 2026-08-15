@@ -1,7 +1,7 @@
 {
   "identity": {
     "assistant_name": "Ada",
-    "user_name": "",
+    "user_name": "Mansur",
     "user_pronouns": "",
     "tone": "playful and witty — warm, brief, a little fun, never stiff or corporate",
     "verbosity": "brief"
@@ -16,23 +16,14 @@
   "model": {
     "conversation": "claude-sonnet-5",
     "max_tokens": 4096,
-    "pricing": {
-      "input_per_mtok": 2.0,
-      "output_per_mtok": 10.0
-    }
+    "pricing": { "input_per_mtok": 2.0, "output_per_mtok": 10.0 }
   },
 
   "budget": {
     "currency": "USD",
     "limits": {
-      "model": {
-        "per_day": 5.0,
-        "per_month": 50.0
-      },
-      "purchases": {
-        "per_day": 0.0,
-        "per_month": 0.0
-      }
+      "model": { "per_day": 5.0, "per_month": 50.0 },
+      "purchases": { "per_day": 0.0, "per_month": 0.0 }
     }
   },
 
@@ -54,39 +45,14 @@
       "make_purchase": "confirm"
     },
     "limits": {
-      "send_message": {
-        "per_minute": 3,
-        "per_hour": 10,
-        "per_day": 30
-      },
-      "reply_email": {
-        "per_minute": 3,
-        "per_hour": 10,
-        "per_day": 30
-      },
-      "compose_email": {
-        "per_minute": 3,
-        "per_hour": 10,
-        "per_day": 30
-      },
-      "make_purchase": {
-        "per_minute": 1,
-        "per_hour": 5,
-        "per_day": 10
-      },
-      "web_search": {
-        "per_minute": 10,
-        "per_day": 300
-      },
-      "list_email": {
-        "per_minute": 10
-      },
-      "search_email": {
-        "per_minute": 10
-      },
-      "read_email": {
-        "per_minute": 20
-      }
+      "send_message": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
+      "reply_email": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
+      "compose_email": { "per_minute": 3, "per_hour": 10, "per_day": 30 },
+      "make_purchase": { "per_minute": 1, "per_hour": 5, "per_day": 10 },
+      "web_search": { "per_minute": 10, "per_day": 300 },
+      "list_email": { "per_minute": 10 },
+      "search_email": { "per_minute": 10 },
+      "read_email": { "per_minute": 20 }
     }
   },
 
@@ -94,14 +60,12 @@
     "vendors": {}
   },
 
+  "shopping": {
+    "list_name": "Reminders"
+  },
+
   "home": {
-    "confirm_domains": [
-      "lock",
-      "cover",
-      "alarm_control_panel",
-      "climate",
-      "water_heater"
-    ]
+    "confirm_domains": ["lock", "cover", "alarm_control_panel", "climate", "water_heater"]
   },
 
   "email": {
@@ -119,21 +83,12 @@
   },
 
   "notifications": {
-    "channels": [
-      "terminal",
-      "macos"
-    ],
-    "push_levels": [
-      "urgent",
-      "critical"
-    ],
+    "channels": ["terminal", "macos"],
+    "push_levels": ["urgent", "critical"],
     "ntfy_topic": ""
   },
 
-  "quiet_hours": {
-    "start": "22:00",
-    "end": "08:00"
-  },
+  "quiet_hours": { "start": "22:00", "end": "08:00" },
 
   "heartbeat": {
     "tick_seconds": 30,
@@ -160,43 +115,16 @@
     "active": "default",
     "presets": {
       "focus": {
-        "notifications": {
-          "push_levels": [
-            "critical"
-          ]
-        },
-        "heartbeat": {
-          "checks": {
-            "new_notes": {
-              "enabled": false
-            }
-          }
-        }
+        "notifications": { "push_levels": ["critical"] },
+        "heartbeat": { "checks": { "new_notes": { "enabled": false } } }
       },
       "weekend": {
-        "quiet_hours": {
-          "start": "23:00",
-          "end": "10:00"
-        },
-        "heartbeat": {
-          "checks": {
-            "stale_reminders": {
-              "enabled": false
-            }
-          }
-        }
+        "quiet_hours": { "start": "23:00", "end": "10:00" },
+        "heartbeat": { "checks": { "stale_reminders": { "enabled": false } } }
       },
       "away": {
-        "notifications": {
-          "channels": [
-            "ntfy"
-          ]
-        }
+        "notifications": { "channels": ["ntfy"] }
       }
     }
-  },
-
-  "shopping": {
-    "list_name": "Reminders"
   }
 }
