@@ -1,5 +1,6 @@
 from ada.tools import (  # noqa: F401  imported for tool-registration side effects
     calendar_tool,
+    discovery,
     contacts,
     drafts,
     email_tool,

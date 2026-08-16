@@ -1259,6 +1259,56 @@ sandboxed browser here can't reach localhost — the same environment limit the
 first face tier recorded. Every endpoint it calls is verified; open
 `http://127.0.0.1:4173` to judge the rest.
 
+## Tool routing (built and verified)
+
+52 tools meant **~7,700 tokens of tool schema on every call**, plus ~1,300 for
+the system prompt: ~9,000 tokens of fixed overhead before a word of
+conversation. Measured, not guessed — about **$49/month** at thirty turns a
+day, enough on its own to trip the $5/day model budget, and it made tool choice
+worse besides, since picking one of 52 near-neighbours is harder than picking
+one of a dozen. This is the problem the Jarvis README names when it talks about
+"embedding-based relevance filtering… add unlimited tools without performance
+degradation".
+
+`ada/routing.py` sends only what a turn looks like it needs — **~4,200-5,600
+tokens saved per call, roughly 60%.**
+
+**Routing is an optimization, never a capability limit.** That rule shapes
+everything, because "I can't do that" about something Ada plainly can is far
+worse than the tokens saved. Three guarantees:
+
+1. A **core set** is always sent — constant daily use, plus *every gated tool*,
+   so a confirmation-worthy action is never quietly absent.
+2. Anything **already used this conversation** stays available, so a follow-up
+   ("no, the other one") can't lose the tool that produced the first answer.
+3. **`find_tool` is always sent** (`ada/tools/discovery.py`). A model that
+   can't see what it needs asks and gets the real schema back — one extra round
+   trip in the rare case, never a refusal.
+
+**Lexical, not embeddings, and that's a considered trade.** Jarvis runs a local
+embedding model; Ada has none, and adding one for a single user is a dependency
+and a model download for a job word-overlap does adequately *given* that the
+guarantees above make a miss recoverable. The seam to swap in embeddings later
+is `_score`.
+
+**Two real bugs, both found by measuring rather than reading:**
+
+1. **`find_tool` never came back empty.** "pilot a helicopter" matched six
+   tools purely on the word "a" — which makes "only say it's impossible if this
+   finds nothing" advice that never applies. Fixed with a stopword list.
+2. **Then it missed real questions.** "what did I spend" found *nothing* while
+   `get_spending` sat right there, because "spend" doesn't match "spending".
+   Fixed with crude stemming.
+
+The threshold between those two failures was **tuned by measurement, not
+taste**, against nine real queries and five things Ada genuinely can't do:
+`1` found 9/9 real but wrongly matched 3/5 junk; `3` found only 7/9 real;
+`2` found 8/9 real and 0/5 junk, so 2 it is. That comparison is recorded in the
+code so the next person can re-run the judgement rather than inherit it.
+
+**Verified:** 536/536 tests pass. Most of them are about routing *not* costing
+a capability rather than about the saving.
+
 ## Consolidation notes
 
 The sections above are in **build order**, not importance order — each records

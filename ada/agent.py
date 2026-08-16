@@ -4,7 +4,7 @@ lives, so voice and text can never drift apart."""
 
 from collections.abc import Callable
 
-from ada import audit, limits, safety, status
+from ada import audit, limits, routing, safety, status
 from ada.llm import stream_turn
 from ada.tools import call as call_tool, specs as tool_specs
 from ada.tools.registry import get as get_tool
@@ -52,7 +52,9 @@ def run_turn(
 
 
 def _stream(messages: list[dict], on_text: Callable[[str], None], on_status: Callable[[str], None]):
-    gen = stream_turn(messages, tools=tool_specs())
+    # Routed, not the whole catalogue — see ada/routing.py. `find_tool` is
+    # always in the set, so a wrong guess costs a round trip, not a refusal.
+    gen = stream_turn(messages, tools=routing.relevant(messages, tool_specs()))
     try:
         while True:
             on_text(next(gen))

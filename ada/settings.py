@@ -150,6 +150,13 @@ DEFAULTS: dict[str, Any] = {
         "smtp_port": 587,
         "archive_mailbox": "[Gmail]/All Mail",
     },
+    "tools": {
+        # "auto" sends only the tools a turn looks like it needs; "all" sends
+        # everything. find_tool is always included either way, so routing can
+        # cost a round trip but never a capability.
+        "routing": "auto",
+        "max": 22,
+    },
     "search": {
         # "auto" picks Brave or Tavily if their key is in .env, else Wikipedia.
         "provider": "auto",
