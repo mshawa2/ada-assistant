@@ -6,12 +6,15 @@ deferred precisely because it's fiddly, and getting it wrong either loses the
 answer or steals the user's next keystroke.
 """
 
+import logging
 import threading
 import time
+import types
 
 import pytest
 
 from ada import status
+from ada.face import server as face_server
 from ada.face.app import app
 
 
@@ -266,6 +269,23 @@ def test_vitals_carries_every_number_the_deck_draws(client):
     assert set(body) == {"uptime", "armed", "catalogue", "messages", "spend", "tokens"}
     assert set(body["tokens"]) == {"input", "output", "cost"}
     assert body["uptime"] >= 0
+
+
+def test_the_face_keeps_its_request_log_out_of_adas_output(monkeypatch):
+    """The face shares stdout with the prompt you type to Ada, and polls five
+    endpoints — the liveliest several times a second. Logging those buries the
+    conversation in `GET /api/status`."""
+    logging.getLogger("werkzeug").setLevel(logging.INFO)
+    # No socket: this asserts on the wiring, not on claiming port 4173.
+    monkeypatch.setattr(
+        face_server,
+        "make_server",
+        lambda *a, **k: types.SimpleNamespace(serve_forever=lambda: None),
+    )
+
+    face_server.start().join(timeout=2)
+
+    assert logging.getLogger("werkzeug").level >= logging.ERROR
 
 
 def test_status_stays_the_shape_the_face_animates_against(client):
