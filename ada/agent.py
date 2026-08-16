@@ -54,7 +54,9 @@ def run_turn(
 def _stream(messages: list[dict], on_text: Callable[[str], None], on_status: Callable[[str], None]):
     # Routed, not the whole catalogue — see ada/routing.py. `find_tool` is
     # always in the set, so a wrong guess costs a round trip, not a refusal.
-    gen = stream_turn(messages, tools=routing.relevant(messages, tool_specs()))
+    tools = routing.relevant(messages, tool_specs())
+    status.set_armed(spec["name"] for spec in tools)
+    gen = stream_turn(messages, tools=tools)
     try:
         while True:
             on_text(next(gen))

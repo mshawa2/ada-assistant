@@ -16,9 +16,10 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from ada import audit, status
+from ada import audit, budget, cost, session, status
 from ada.heartbeat.kill_switch import is_paused, set_paused
 from ada.heartbeat.notices import dismiss_notice, list_notices
+from ada.tools import specs as tool_specs
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -83,3 +84,24 @@ def api_heartbeat_resume():
 @app.route("/api/activity")
 def api_activity():
     return jsonify(audit.tail(30))
+
+
+@app.route("/api/vitals")
+def api_vitals():
+    """The slow-moving numbers, in one poll.
+
+    Separate from `/api/status` because they move on different clocks: state
+    has to be read several times a second to animate, while money and token
+    counts change once a turn. Polling them together would mean either a
+    sluggish face or reading `data/session.json` off disk ten times a second.
+    """
+    return jsonify(
+        {
+            "uptime": status.uptime(),
+            "armed": status.armed(),
+            "catalogue": len(tool_specs()),
+            "messages": len(session.load()),
+            "spend": budget.gauges(),
+            "tokens": cost.totals(),
+        }
+    )

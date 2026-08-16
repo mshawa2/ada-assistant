@@ -41,6 +41,8 @@ _transcript: list[dict] = []
 _current_tool: str | None = None
 _pending = None
 _ids = itertools.count(1)
+_armed: list[str] = []
+_started = time.time()
 
 
 class Pending:
@@ -102,6 +104,32 @@ def get_status() -> str:
 def current_tool():
     with _lock:
         return _current_tool
+
+
+def uptime() -> float:
+    """Seconds since the process came up, for the face's clock."""
+    return time.time() - _started
+
+
+# --- what the model is holding this turn ------------------------------------
+
+
+def set_armed(names) -> None:
+    """Record the tools routing picked for this turn.
+
+    `ada/routing.py` narrows 50-odd tools down to the handful a question
+    actually needs, and until now that choice was invisible — the one thing
+    you'd want to see when a tool you expected wasn't used. It's display only:
+    nothing reads this back to make a decision.
+    """
+    global _armed
+    with _lock:
+        _armed = [str(n) for n in names]
+
+
+def armed() -> list[str]:
+    with _lock:
+        return list(_armed)
 
 
 # --- the live conversation --------------------------------------------------

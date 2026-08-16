@@ -133,11 +133,17 @@ def record(category: str, amount: float, note: str = "") -> None:
         store.write_json(_STORE, ledger)
 
 
-def summary() -> str:
-    """What's been spent against each cap, for showing the user."""
+def gauges() -> list[dict]:
+    """Every configured cap with what's been spent against it, as numbers.
+
+    `summary()` renders these as a sentence for the model to say out loud. The
+    face draws them as bars, and a bar needs the two numbers rather than the
+    sentence — so the reading lives here and both callers share it, instead of
+    one of them parsing the other's prose.
+    """
     limits = settings.get("budget.limits", {}) or {}
 
-    lines = []
+    readings = []
     for category, windows in limits.items():
         for window_name, cap in (windows or {}).items():
             # `null` disables a window. Settings merge additively, so an empty
@@ -146,8 +152,28 @@ def summary() -> str:
             if window_name not in WINDOWS or cap is None:
                 continue
             used = spent(category, WINDOWS[window_name])
-            label = _LABELS[window_name]
-            headroom = "at the limit" if used >= cap else f"{money(cap - used)} left"
-            lines.append(f"{category}: {money(used)} of {money(cap)} this {label} ({headroom})")
+            readings.append(
+                {
+                    "category": category,
+                    "window": _LABELS[window_name],
+                    "used": used,
+                    "cap": cap,
+                    "used_text": money(used),
+                    "cap_text": money(cap),
+                }
+            )
+    return readings
+
+
+def summary() -> str:
+    """What's been spent against each cap, for showing the user."""
+    lines = []
+    for gauge in gauges():
+        left = money(gauge["cap"] - gauge["used"])
+        headroom = "at the limit" if gauge["used"] >= gauge["cap"] else f"{left} left"
+        lines.append(
+            f"{gauge['category']}: {gauge['used_text']} of {gauge['cap_text']} "
+            f"this {gauge['window']} ({headroom})"
+        )
 
     return "\n".join(lines) if lines else "No spending limits are configured."

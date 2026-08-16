@@ -51,15 +51,26 @@ def record(input_tokens: int, output_tokens: int) -> None:
     )
 
 
-def summary() -> str | None:
+def totals() -> dict:
+    """This session's tokens and what they're estimated to have cost."""
     with _lock:
         input_tokens, output_tokens = _input_tokens, _output_tokens
+    return {
+        "input": input_tokens,
+        "output": output_tokens,
+        "cost": price_of(input_tokens, output_tokens),
+    }
+
+
+def summary() -> str | None:
+    counted = totals()
+    input_tokens, output_tokens = counted["input"], counted["output"]
     if not input_tokens and not output_tokens:
         return None
 
     line = (
         f"Session usage: {input_tokens:,} input / {output_tokens:,} output tokens "
-        f"(~{budget.money(price_of(input_tokens, output_tokens))}, approximate)"
+        f"(~{budget.money(counted['cost'])}, approximate)"
     )
     running = budget.summary()
     return f"{line}\n{running}" if "No spending limits" not in running else line

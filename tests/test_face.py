@@ -20,9 +20,11 @@ def clean_state():
     status.clear_transcript()
     status.end_confirmation()
     status.set_status("idle")
+    status.set_armed([])
     yield
     status.clear_transcript()
     status.end_confirmation()
+    status.set_armed([])
 
 
 @pytest.fixture
@@ -237,6 +239,38 @@ def test_the_page_is_served(client):
     assert b"orb" in response.data
 
 
-@pytest.mark.parametrize("route", ["/api/status", "/api/notices", "/api/heartbeat", "/api/activity"])
+@pytest.mark.parametrize(
+    "route", ["/api/status", "/api/notices", "/api/heartbeat", "/api/activity", "/api/vitals"]
+)
 def test_every_read_endpoint_answers(client, route):
     assert client.get(route).status_code == 200
+
+
+# --- the readouts the deck draws --------------------------------------------
+
+
+def test_the_tools_routing_picked_are_visible(client):
+    """Routing narrows 50-odd tools to a handful, and which handful is the one
+    thing you want to see when a tool you expected wasn't used."""
+    status.set_armed(["get_calendar_events", "find_tool"])
+
+    body = client.get("/api/vitals").get_json()
+
+    assert body["armed"] == ["get_calendar_events", "find_tool"]
+    assert body["catalogue"] >= len(body["armed"])
+
+
+def test_vitals_carries_every_number_the_deck_draws(client):
+    body = client.get("/api/vitals").get_json()
+
+    assert set(body) == {"uptime", "armed", "catalogue", "messages", "spend", "tokens"}
+    assert set(body["tokens"]) == {"input", "output", "cost"}
+    assert body["uptime"] >= 0
+
+
+def test_status_stays_the_shape_the_face_animates_against(client):
+    """The slow numbers went into /api/vitals precisely so this stayed small —
+    it's polled several times a second."""
+    body = client.get("/api/status").get_json()
+
+    assert set(body) == {"status", "state", "tool", "transcript", "pending"}

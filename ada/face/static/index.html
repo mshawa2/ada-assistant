@@ -4,198 +4,517 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ada</title>
+<!-- Inline so the tab carries the core's colour instead of a 404 in the
+     console of a page that's meant to sit open all day. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='9' fill='%236fd8ff'/%3E%3C/svg%3E">
 <!--
   One file, no build step, no dependencies — the same choice the first
   dashboard made, kept because it's still right for something you open on
   localhost and never deploy.
 
-  The orb is the point. It's driven entirely by the `state` the backend
-  derives (idle / listening / transcribing / thinking / tool / speaking /
-  waiting), so the front end never pattern-matches on prose, and adding a
-  state later means adding a colour here rather than parsing a sentence.
+  This is the command-deck version: a wall of panels rather than a page you
+  scroll. The rule it's built on is that every readout is a real number Ada
+  actually holds — spend against the caps in `ada/budget.py`, the tools
+  `ada/routing.py` armed for this turn, the audit tail. Nothing here is
+  decorative telemetry. A HUD that invents numbers is a screensaver, and you
+  can't trust the true readings sitting next to the invented ones.
 
-  Everything animates with CSS on a single element rather than a canvas loop:
-  it costs nothing when idle, which matters for a thing meant to sit open on a
-  second screen all day.
+  The core is still driven entirely by the `state` the backend derives (idle /
+  listening / transcribing / thinking / tool / speaking / waiting), so the
+  front end never pattern-matches on prose. States now retint the whole deck
+  through a couple of custom properties: amber while a tool runs, red while
+  it's blocked on you. That's a colour change in one place, not a mode.
+
+  Everything animates in CSS. It costs nothing when idle, which matters for a
+  thing meant to sit open on a second screen all day.
 -->
 <style>
   :root {
-    --bg: #07090d;
-    --panel: rgba(255,255,255,.035);
-    --line: rgba(255,255,255,.09);
-    --text: #e8ecf4;
-    --dim: #7d879c;
-    --accent: #4cc2ff;
-    --hot: #ff9d5c;
+    --bg: #04070c;
+    --cyan: #6fd8ff;
+    --accent: #6fd8ff;                     /* retinted per state */
+    --edge: rgba(111, 216, 255, .22);
+    --fill: rgba(111, 216, 255, .04);
+    --glow: rgba(111, 216, 255, .16);
+    --text: #d6e8f5;
+    --dim: #5d7d95;
     --go: #4ade80;
     --stop: #f87171;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    --gap: 12px;
   }
+  /* A tool run tints the whole wall warm; being blocked on a human turns it
+     red. Same panels, unmistakably different mood — you can read the room
+     from across it without reading a word. */
+  body[data-state="tool"] {
+    --accent: #ffb469; --edge: rgba(255, 180, 105, .28);
+    --fill: rgba(255, 180, 105, .05); --glow: rgba(255, 180, 105, .18);
+  }
+  body[data-state="waiting"] {
+    --accent: #ff7676; --edge: rgba(255, 118, 118, .34);
+    --fill: rgba(255, 118, 118, .06); --glow: rgba(255, 118, 118, .2);
+  }
+
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.55 ui-rounded, -apple-system, "SF Pro Text", system-ui, sans-serif;
-    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-    padding: 28px 20px 40px;
+    margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+    font: 14px/1.5 ui-rounded, -apple-system, "SF Pro Text", system-ui, sans-serif;
   }
-  body::before {
-    /* A slow wash behind everything so the page feels alive, not static. */
-    content: ""; position: fixed; inset: -30%; z-index: -1; opacity: .5;
-    background: radial-gradient(45% 45% at 50% 30%, rgba(76,194,255,.14), transparent 70%);
+
+  /* --- the room behind the glass ------------------------------------------
+     Three fixed layers: a floor receding to a horizon, a wash of light where
+     the core sits, and scanlines over everything. */
+  .room { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+  .floor {
+    position: absolute; left: -50%; right: -50%; bottom: -20%; height: 80%;
+    background:
+      repeating-linear-gradient(90deg, transparent 0 78px, var(--edge) 78px 79px),
+      repeating-linear-gradient(0deg, transparent 0 46px, var(--edge) 46px 47px);
+    transform: perspective(420px) rotateX(74deg);
+    transform-origin: 50% 100%; opacity: .5;
+    -webkit-mask-image: linear-gradient(transparent, #000 55%);
+    mask-image: linear-gradient(transparent, #000 55%);
+    animation: floor-run 5.5s linear infinite;
+  }
+  @keyframes floor-run { to { background-position: 0 47px, 0 47px; } }
+  .wash {
+    position: absolute; inset: -25%;
+    background: radial-gradient(38% 42% at 50% 42%, var(--glow), transparent 68%);
     animation: drift 22s ease-in-out infinite alternate;
   }
-  @keyframes drift { to { transform: translate3d(0, 6%, 0) scale(1.15); } }
-
-  header { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
-  h1 { font-size: 15px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; margin: 0; color: var(--dim); }
-
-  /* --- the orb --- */
-  .orb-wrap { position: relative; width: 168px; height: 168px; display: grid; place-items: center; margin-bottom: 10px; }
-  .orb {
-    width: 96px; height: 96px; border-radius: 50%;
-    background: radial-gradient(circle at 34% 30%, #fff, var(--accent) 42%, #14526f 100%);
-    box-shadow: 0 0 44px -6px var(--accent), inset 0 0 26px rgba(255,255,255,.32);
-    transition: background .5s ease, box-shadow .5s ease, transform .3s ease;
+  @keyframes drift { to { transform: translate3d(0, 4%, 0) scale(1.14); } }
+  .scan {
+    position: absolute; inset: 0; opacity: .5;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.5) 0 1px, transparent 1px 3px);
   }
-  .ring {
-    position: absolute; inset: 0; border-radius: 50%;
+  .scan::after {
+    /* one bright line, endlessly falling — the thing that makes it read as a
+       display rather than a printed page */
+    content: ""; position: absolute; left: 0; right: 0; height: 130px;
+    background: linear-gradient(transparent, var(--glow), transparent);
+    opacity: .5; animation: fall 7s linear infinite;
+  }
+  @keyframes fall { from { top: -140px; } to { top: 100%; } }
+  .vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(70% 60% at 50% 45%, transparent 40%, rgba(0,0,0,.72));
+  }
+
+  /* --- deck layout --------------------------------------------------------- */
+  .deck {
+    position: relative; z-index: 1; height: 100%; display: grid; gap: var(--gap);
+    padding: var(--gap);
+    grid-template-columns: 274px minmax(0, 1fr) 310px;
+    grid-template-rows: 34px minmax(0, 1fr) 20px;
+    grid-template-areas:
+      "top  top   top"
+      "left core  right"
+      "foot foot  foot";
+  }
+  .rail { display: grid; gap: var(--gap); min-height: 0; }
+  .rail.left  { grid-area: left;  grid-template-rows: auto auto minmax(0, 1fr); }
+  .rail.right { grid-area: right; grid-template-rows: auto minmax(0, 1fr); }
+  .middle {
+    grid-area: core; display: grid; gap: var(--gap); min-height: 0;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 42%);
+  }
+
+  /* --- the panels ---------------------------------------------------------
+     A notched corner and two bracket marks. Cheap, and it's what makes a box
+     read as an instrument rather than a card. */
+  .panel {
+    position: relative; min-height: 0; display: flex; flex-direction: column;
+    background: linear-gradient(160deg, var(--fill), rgba(6, 16, 26, .62));
+    border: 1px solid var(--edge);
+    clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 15px 100%, 0 calc(100% - 15px));
+    backdrop-filter: blur(3px);
+    animation: rise .65s cubic-bezier(.2, .8, .2, 1) both;
+    animation-delay: var(--d, 0s);
+    transition: border-color .5s ease;
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+  .panel::before, .panel::after {
+    content: ""; position: absolute; width: 13px; height: 13px;
+    border: 1px solid var(--accent); opacity: .8; pointer-events: none;
+    transition: border-color .5s ease;
+  }
+  .panel::before { top: 5px; left: 5px; border-width: 1px 0 0 1px; }
+  .panel::after { bottom: 5px; right: 5px; border-width: 0 1px 1px 0; }
+
+  .p-head {
+    display: flex; align-items: center; gap: 9px; padding: 9px 13px 8px;
+    border-bottom: 1px solid var(--edge); flex: none;
+  }
+  .p-head h2 {
+    margin: 0; font-size: 10px; font-weight: 700; letter-spacing: .2em;
+    text-transform: uppercase; color: var(--accent); white-space: nowrap;
+    transition: color .5s ease;
+  }
+  .p-head .hatch {
+    flex: 1; height: 7px; opacity: .45;
+    background: repeating-linear-gradient(115deg, var(--accent) 0 1px, transparent 1px 5px);
+  }
+  .p-head .meta { font: 10px/1 var(--mono); letter-spacing: .12em; color: var(--dim); white-space: nowrap; }
+  .p-body { padding: 11px 13px 13px; overflow-y: auto; min-height: 0; flex: 1; }
+  .p-body::-webkit-scrollbar { width: 4px; }
+  .p-body::-webkit-scrollbar-thumb { background: var(--edge); }
+
+  /* --- header + footer strips --------------------------------------------- */
+  .strip {
+    display: flex; align-items: center; gap: 14px;
+    font: 10px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; color: var(--dim);
+  }
+  .top { grid-area: top; border-bottom: 1px solid var(--edge); padding-bottom: 9px; }
+  .foot { grid-area: foot; border-top: 1px solid var(--edge); padding-top: 7px; }
+  .mark { display: flex; align-items: baseline; gap: 9px; }
+  .mark b {
+    font: 700 17px/1 ui-rounded, system-ui, sans-serif; letter-spacing: .42em;
+    color: var(--text); text-transform: uppercase;
+  }
+  .mark span { color: var(--accent); transition: color .5s ease; }
+  .live { display: flex; align-items: center; gap: 7px; color: var(--accent); transition: color .5s ease; }
+  .live i {
+    width: 6px; height: 6px; background: var(--accent); border-radius: 50%;
+    box-shadow: 0 0 9px var(--accent); animation: pip 2.4s ease-in-out infinite;
+  }
+  @keyframes pip { 50% { opacity: .25; } }
+  .spacer { flex: 1; }
+
+  /* --- the core ------------------------------------------------------------
+     The one panel with no fill of its own: the room's floor and light have to
+     read *through* the core, or it looks stuck to a card instead of hanging in
+     the air. */
+  .core-panel { align-items: center; justify-content: center; background: none; backdrop-filter: none; }
+  .stage {
+    position: relative; width: 320px; height: 320px; max-width: 100%;
+    display: grid; place-items: center; margin-bottom: 54px;
+  }
+  .rings { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .rings circle, .rings path, .rings polygon, .rings line {
+    fill: none; stroke: var(--accent); transition: stroke .5s ease;
+  }
+  .spin-slow { animation: spin 66s linear infinite; }
+  .spin-back { animation: spin 26s linear infinite reverse; }
+  .spin-fast { animation: spin 11s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .halo {
+    position: absolute; width: 210px; height: 210px; border-radius: 50%;
+    background: radial-gradient(circle, var(--glow), transparent 68%);
+    animation: breathe 5s ease-in-out infinite;
+  }
+  .orb {
+    position: relative; width: 88px; height: 88px; border-radius: 50%;
+    background: radial-gradient(circle at 34% 30%, #fff, var(--accent) 44%, rgba(6, 40, 58, .95) 100%);
+    box-shadow: 0 0 46px -6px var(--accent), inset 0 0 26px rgba(255, 255, 255, .32);
+    transition: background .5s ease, box-shadow .5s ease, transform .3s ease, opacity .3s ease;
+  }
+  .sonar {
+    position: absolute; width: 300px; height: 300px; border-radius: 50%;
     border: 1px solid var(--accent); opacity: 0; pointer-events: none;
   }
+
   /* idle: a slow breath, so it reads as awake but not doing anything */
   [data-state="idle"] .orb { animation: breathe 5s ease-in-out infinite; }
   @keyframes breathe { 50% { transform: scale(1.05); } }
 
   /* listening: rings pushing outward, like it's reaching for sound */
-  [data-state="listening"] .ring { animation: sonar 2s ease-out infinite; }
-  [data-state="listening"] .ring:nth-child(2) { animation-delay: .66s; }
-  [data-state="listening"] .ring:nth-child(3) { animation-delay: 1.32s; }
+  [data-state="listening"] .sonar { animation: sonar 2s ease-out infinite; }
+  [data-state="listening"] .sonar:nth-of-type(2) { animation-delay: .66s; }
+  [data-state="listening"] .sonar:nth-of-type(3) { animation-delay: 1.32s; }
   @keyframes sonar {
-    0% { transform: scale(.55); opacity: .55; }
-    100% { transform: scale(1.1); opacity: 0; }
+    0% { transform: scale(.32); opacity: .5; }
+    100% { transform: scale(1); opacity: 0; }
   }
 
-  /* thinking / transcribing: tighter, faster, a bit impatient */
+  /* thinking / transcribing: tighter, faster, a bit impatient — and the arc
+     ring spins up with it, which is the part you see from across the room */
   [data-state="thinking"] .orb, [data-state="transcribing"] .orb { animation: think .9s ease-in-out infinite; }
+  [data-state="thinking"] .spin-fast, [data-state="transcribing"] .spin-fast { animation-duration: 2.4s; }
+  [data-state="thinking"] .spin-back, [data-state="transcribing"] .spin-back { animation-duration: 9s; }
   @keyframes think { 50% { transform: scale(.9); filter: brightness(1.3); } }
 
-  /* using a tool: warm, and the tool is named underneath */
-  [data-state="tool"] .orb {
-    background: radial-gradient(circle at 34% 30%, #fff, var(--hot) 42%, #6b3418 100%);
-    box-shadow: 0 0 44px -6px var(--hot), inset 0 0 26px rgba(255,255,255,.32);
-    animation: think .7s ease-in-out infinite;
-  }
+  /* using a tool: the whole deck has already gone amber; the core hurries */
+  [data-state="tool"] .orb { animation: think .7s ease-in-out infinite; }
+  [data-state="tool"] .spin-fast { animation-duration: 3.6s; }
 
-  /* speaking: the bars, which is the one moment you want to look at it.
+  /* speaking: the waveform, which is the one moment you want to look at it.
      The orb drops right back and dims to a glow — at full strength the bars
      sat on top of it and the whole thing read as a muddle rather than a
      waveform. */
-  [data-state="speaking"] .orb { animation: none; transform: scale(.42); opacity: .3; filter: blur(6px); }
-  .bars { position: absolute; display: none; gap: 5px; align-items: center; height: 66px; }
-  [data-state="speaking"] .bars { display: flex; }
-  .bars i {
-    display: block; width: 5px; border-radius: 3px; background: var(--accent);
-    animation: talk .62s ease-in-out infinite; height: 18px;
+  [data-state="speaking"] .orb { animation: none; transform: scale(.34); opacity: .28; filter: blur(6px); }
+  .wave { position: absolute; inset: 0; display: none; }
+  [data-state="speaking"] .wave { display: block; }
+  .wave i {
+    position: absolute; top: 50%; left: 50%; width: 3px; height: 16px;
+    margin: -8px 0 0 -1.5px; border-radius: 2px; background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    transform: rotate(calc(var(--i) * 10deg)) translateY(-74px);
+    animation: talk .68s ease-in-out infinite;
+    animation-delay: calc(var(--i) * -.045s);
   }
-  .bars i:nth-child(2){animation-delay:.09s} .bars i:nth-child(3){animation-delay:.18s}
-  .bars i:nth-child(4){animation-delay:.27s} .bars i:nth-child(5){animation-delay:.36s}
-  .bars i:nth-child(6){animation-delay:.45s} .bars i:nth-child(7){animation-delay:.54s}
-  @keyframes talk { 50% { height: 58px; } }
+  @keyframes talk { 50% { height: 44px; margin-top: -22px; } }
 
-  /* waiting on you: red, insistent, impossible to mistake for working */
-  [data-state="waiting"] .orb {
-    background: radial-gradient(circle at 34% 30%, #fff, var(--stop) 42%, #6b1c1c 100%);
-    box-shadow: 0 0 54px -4px var(--stop), inset 0 0 26px rgba(255,255,255,.32);
-    animation: urgent .8s ease-in-out infinite;
-  }
+  /* waiting on you: insistent, impossible to mistake for working */
+  [data-state="waiting"] .orb { animation: urgent .8s ease-in-out infinite; }
   @keyframes urgent { 50% { transform: scale(1.09); } }
 
-  .state-label { color: var(--dim); font-size: 13px; letter-spacing: .1em; min-height: 20px; }
-  .state-label b { color: var(--hot); font-weight: 600; }
-
-  main { width: 100%; max-width: 720px; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; margin-top: 16px; }
-  .panel h2 { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin: 0 0 12px; font-weight: 600; }
-
-  /* --- conversation --- */
-  #chat { display: flex; flex-direction: column; gap: 14px; max-height: 46vh; overflow-y: auto; }
-  .turn { display: grid; grid-template-columns: 46px 1fr; gap: 12px; }
-  .who { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); padding-top: 3px; }
-  .said { white-space: pre-wrap; word-break: break-word; }
-  .turn.you .said { color: #b9c4d8; }
-  .cursor::after {
-    content: "\258C"; color: var(--accent); animation: blink 1s steps(2) infinite; margin-left: 1px;
+  .readout { position: absolute; bottom: -50px; left: -60px; right: -60px; text-align: center; }
+  .readout .state {
+    font: 700 14px/1 var(--mono); letter-spacing: .34em; text-transform: uppercase;
+    color: var(--accent); transition: color .5s ease;
   }
+  .readout .sub {
+    margin-top: 7px; font: 10px/1.4 var(--mono); letter-spacing: .18em;
+    color: var(--dim); text-transform: uppercase;
+  }
+
+  /* --- confirmation, over the core ---------------------------------------- */
+  #confirm {
+    position: absolute; inset: 12px; z-index: 3; display: none;
+    /* Opaque, unlike every other panel. This is the one thing on the wall you
+       have to read exactly — the core turning behind the words was pretty and
+       made a phone number harder to check. */
+    background: linear-gradient(160deg, #2a0a10 0%, #0d0407 65%);
+    backdrop-filter: blur(10px);
+    border-color: rgba(255, 118, 118, .55); animation: alarm 1.3s ease-in-out infinite;
+  }
+  #confirm.show { display: flex; }
+  @keyframes alarm { 50% { border-color: rgba(255, 118, 118, .16); } }
+  /* While there's a question on screen, the core gets out of the way entirely
+     rather than turning behind it — the ring's ticks and the state readout
+     both poked out past the overlay's edges. */
+  .core-panel:has(#confirm.show) .stage { opacity: 0; }
+  .stage { transition: opacity .3s ease; }
+  #confirm .p-body { display: flex; flex-direction: column; justify-content: center; }
+  #confirm pre {
+    white-space: pre-wrap; word-break: break-word; margin: 0 0 18px;
+    font-family: inherit; font-size: 15px; line-height: 1.55; color: #ffe4e4;
+  }
+  .buttons { display: flex; gap: 10px; }
+  button {
+    font: 600 12px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase;
+    padding: 9px 16px; cursor: pointer; color: var(--text);
+    border: 1px solid var(--edge); background: rgba(255, 255, 255, .05);
+    clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+    transition: background .2s ease, border-color .2s ease;
+  }
+  button:hover { background: rgba(255, 255, 255, .12); }
+  button.go { background: rgba(74, 222, 128, .14); border-color: rgba(74, 222, 128, .5); color: var(--go); }
+  button.stop { background: rgba(248, 113, 113, .14); border-color: rgba(248, 113, 113, .5); color: var(--stop); }
+  button.tiny { padding: 4px 9px; font-size: 10px; letter-spacing: .12em; }
+
+  /* --- conversation -------------------------------------------------------- */
+  #chat { display: flex; flex-direction: column; gap: 13px; }
+  .turn { display: grid; grid-template-columns: 2px 40px 1fr; gap: 10px; align-items: stretch; }
+  .turn .tick { background: var(--edge); min-height: 16px; }
+  .turn.ada .tick { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .who {
+    font: 10px/1.5 var(--mono); letter-spacing: .16em; text-transform: uppercase;
+    color: var(--dim); padding-top: 2px;
+  }
+  .turn.ada .who { color: var(--accent); }
+  .said { white-space: pre-wrap; word-break: break-word; }
+  .turn.you .said { color: #9fb4c8; }
+  .cursor::after { content: "\258C"; color: var(--accent); animation: blink 1s steps(2) infinite; margin-left: 1px; }
   @keyframes blink { 50% { opacity: 0; } }
   .empty { color: var(--dim); font-style: italic; }
 
-  /* --- confirmation --- */
-  #confirm { display: none; border-color: rgba(248,113,113,.5); background: rgba(248,113,113,.07); }
-  #confirm.show { display: block; }
-  #confirm h2 { color: var(--stop); }
-  #confirm pre { white-space: pre-wrap; word-break: break-word; margin: 0 0 14px; font: inherit; }
-  .buttons { display: flex; gap: 10px; }
-  button {
-    font: inherit; font-weight: 600; padding: 9px 18px; border-radius: 10px;
-    border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--text); cursor: pointer;
-  }
-  button:hover { background: rgba(255,255,255,.12); }
-  button.go { background: rgba(74,222,128,.16); border-color: rgba(74,222,128,.45); color: var(--go); }
-  button.stop { background: rgba(248,113,113,.16); border-color: rgba(248,113,113,.45); color: var(--stop); }
+  /* --- readouts: rows, gauges, chips, feed --------------------------------- */
+  .kv { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 5px 0; }
+  .kv + .kv { border-top: 1px solid rgba(255, 255, 255, .05); }
+  .kv .k { font: 10px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
+  .kv .v { font: 12px/1 var(--mono); color: var(--text); text-align: right; }
+  .kv .v.hot { color: var(--accent); transition: color .5s ease; }
 
-  /* --- notices + activity --- */
-  .notice { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-top: 1px solid var(--line); }
-  .notice:first-of-type { border-top: 0; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 7px; flex: none; background: var(--dim); }
-  .dot.urgent { background: var(--hot); } .dot.critical { background: var(--stop); }
-  .notice button { padding: 3px 10px; font-size: 12px; font-weight: 500; }
-  .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-  #activity { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--dim); max-height: 168px; overflow-y: auto; }
-  #activity div { padding: 2px 0; }
-  .muted { color: var(--dim); font-size: 13px; }
-  footer { color: var(--dim); font-size: 12px; margin-top: 22px; }
+  .gauge + .gauge { margin-top: 11px; }
+  .gauge .g-top { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+  .gauge .g-top span:first-child {
+    font: 10px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--dim);
+  }
+  .gauge .g-top span:last-child { font: 11px/1 var(--mono); color: var(--text); }
+  .g-track { height: 5px; background: rgba(255, 255, 255, .07); overflow: hidden; }
+  .g-track i {
+    display: block; height: 100%; background: var(--accent);
+    box-shadow: 0 0 10px var(--accent); transition: width .6s ease;
+  }
+  .g-track i.over { background: var(--stop); box-shadow: 0 0 10px var(--stop); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip {
+    font: 10px/1 var(--mono); letter-spacing: .06em; padding: 5px 7px; color: var(--dim);
+    border: 1px solid var(--edge); background: rgba(255, 255, 255, .03);
+  }
+  .chip.running { color: #06121c; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+
+  .notice { display: flex; gap: 9px; align-items: flex-start; padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, .06); }
+  .notice:first-child { border-top: 0; padding-top: 0; }
+  .dot { width: 6px; height: 6px; margin-top: 6px; flex: none; background: var(--dim); }
+  .dot.urgent { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .dot.critical { background: var(--stop); box-shadow: 0 0 8px var(--stop); }
+  .notice .txt { flex: 1; font-size: 13px; }
+
+  #activity { font: 11px/1.7 var(--mono); color: var(--dim); }
+  #activity div { display: flex; gap: 9px; white-space: nowrap; }
+  #activity div:first-child { color: var(--accent); }
+  #activity .t { opacity: .55; }
+  #activity .n { overflow: hidden; text-overflow: ellipsis; }
+  .muted { color: var(--dim); font-size: 12px; margin: 0; }
+
+  /* --- boot ---------------------------------------------------------------- */
+  .boot {
+    position: fixed; inset: 0; z-index: 9; background: var(--bg); display: grid; place-items: center;
+    animation: boot-out .5s ease 1.05s forwards; pointer-events: none;
+  }
+  @keyframes boot-out { to { opacity: 0; visibility: hidden; } }
+  .boot b { font: 700 20px/1 ui-rounded, system-ui, sans-serif; letter-spacing: .5em; color: var(--accent); }
+  .boot .load { width: 190px; height: 2px; margin-top: 16px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+  .boot .load::after { content: ""; display: block; height: 100%; width: 0; background: var(--accent); animation: load 1s ease-out forwards; }
+  @keyframes load { to { width: 100%; } }
+
+  /* --- narrow screens: stop pretending it's a wall ------------------------- */
+  @media (max-width: 1150px), (max-height: 620px) {
+    body { overflow: auto; }
+    .deck {
+      height: auto; min-height: 100%;
+      grid-template-columns: 1fr; grid-template-rows: auto;
+      grid-template-areas: "top" "core" "left" "right" "foot";
+    }
+    .middle { grid-template-rows: auto auto; }
+    .core-panel { min-height: 400px; }
+    .p-body { max-height: 340px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001s !important; animation-iteration-count: 1 !important;
+      transition-duration: .001s !important;
+    }
+  }
 </style>
 </head>
 <body data-state="idle">
 
-<header><h1>Ada</h1></header>
-
-<div class="orb-wrap">
-  <div class="ring"></div><div class="ring"></div><div class="ring"></div>
-  <div class="orb"></div>
-  <div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+<div class="room">
+  <div class="wash"></div>
+  <div class="floor"></div>
+  <div class="scan"></div>
+  <div class="vignette"></div>
 </div>
-<div class="state-label" id="state-label">idle</div>
 
-<main>
-  <section class="panel" id="confirm">
-    <h2>Waiting for you</h2>
-    <pre id="confirm-text"></pre>
-    <div class="buttons">
-      <button class="go" id="approve">Approve</button>
-      <button class="stop" id="decline">Decline</button>
-    </div>
-    <p class="muted" style="margin:12px 0 0">You can also answer in the terminal — whichever comes first.</p>
-  </section>
+<div class="boot"><div><b>ADA</b><div class="load"></div></div></div>
 
-  <section class="panel">
-    <h2>Conversation</h2>
-    <div id="chat"><div class="empty">Say &ldquo;Ada&rdquo; to start, or type in the terminal.</div></div>
-  </section>
+<div class="deck">
 
-  <section class="panel">
-    <div class="row" style="margin-bottom:12px">
-      <h2 style="margin:0">Noticed</h2>
-      <button id="heartbeat-toggle">&hellip;</button>
-    </div>
-    <div id="notices"><p class="muted">Nothing to report.</p></div>
-  </section>
+  <div class="strip top">
+    <span class="mark"><b>Ada</b><span>//</span></span>
+    <span class="live"><i></i><span id="top-state">idle</span></span>
+    <span class="spacer"></span>
+    <span id="top-armed">tools &mdash;</span>
+    <span id="top-spend">spend &mdash;</span>
+    <span id="top-clock">--:--:--</span>
+  </div>
 
-  <section class="panel">
-    <h2>Activity</h2>
-    <div id="activity"></div>
-  </section>
-</main>
+  <div class="rail left">
+    <section class="panel" style="--d:.05s">
+      <div class="p-head"><h2>System</h2><div class="hatch"></div></div>
+      <div class="p-body">
+        <div class="kv"><span class="k">State</span><span class="v hot" id="v-state">idle</span></div>
+        <div class="kv"><span class="k">Uptime</span><span class="v" id="v-uptime">0:00:00</span></div>
+        <div class="kv"><span class="k">History</span><span class="v" id="v-messages">&mdash;</span></div>
+        <div class="kv"><span class="k">Catalogue</span><span class="v" id="v-catalogue">&mdash;</span></div>
+        <div class="kv"><span class="k">Heartbeat</span><button class="tiny" id="heartbeat-toggle">&hellip;</button></div>
+      </div>
+    </section>
 
-<footer>Local only &middot; 127.0.0.1:4173</footer>
+    <section class="panel" style="--d:.12s">
+      <div class="p-head"><h2>Expenditure</h2><div class="hatch"></div><span class="meta" id="v-tokens">&mdash;</span></div>
+      <div class="p-body" id="spend"><p class="muted">No limits configured.</p></div>
+    </section>
+
+    <section class="panel" style="--d:.19s">
+      <div class="p-head"><h2>Armed</h2><div class="hatch"></div><span class="meta" id="v-armed-count">0</span></div>
+      <div class="p-body"><div class="chips" id="armed"><p class="muted">Nothing routed yet.</p></div></div>
+    </section>
+  </div>
+
+  <div class="middle">
+    <section class="panel core-panel">
+      <div class="stage">
+        <div class="halo"></div>
+
+        <svg class="rings" viewBox="0 0 320 320" aria-hidden="true">
+          <g class="spin-slow" style="transform-origin:160px 160px">
+            <circle cx="160" cy="160" r="150" stroke-width="7" stroke-dasharray="1 8" opacity=".55"/>
+          </g>
+          <circle cx="160" cy="160" r="138" stroke-width="1" opacity=".22"/>
+          <g class="spin-back" style="transform-origin:160px 160px">
+            <circle cx="160" cy="160" r="126" stroke-width="1.5" stroke-dasharray="64 22 9 22" opacity=".65"/>
+          </g>
+          <g class="spin-fast" style="transform-origin:160px 160px">
+            <path d="M160 62 A98 98 0 0 1 229 91" stroke-width="2.5" opacity=".85"/>
+            <path d="M160 258 A98 98 0 0 1 91 229" stroke-width="2.5" opacity=".85"/>
+          </g>
+          <circle cx="160" cy="160" r="84" stroke-width="1" opacity=".18"/>
+          <g class="spin-back" style="transform-origin:160px 160px">
+            <polygon points="160,96 215,128 215,192 160,224 105,192 105,128" stroke-width="1" opacity=".3"/>
+          </g>
+          <g opacity=".5">
+            <line x1="160" y1="6" x2="160" y2="20" stroke-width="1.5"/>
+            <line x1="160" y1="300" x2="160" y2="314" stroke-width="1.5"/>
+            <line x1="6" y1="160" x2="20" y2="160" stroke-width="1.5"/>
+            <line x1="300" y1="160" x2="314" y2="160" stroke-width="1.5"/>
+          </g>
+        </svg>
+
+        <div class="sonar"></div><div class="sonar"></div><div class="sonar"></div>
+        <div class="orb"></div>
+        <div class="wave" id="wave"></div>
+
+        <div class="readout">
+          <div class="state" id="state-label">idle</div>
+          <div class="sub" id="state-sub">standing by</div>
+        </div>
+      </div>
+
+      <section class="panel" id="confirm">
+        <div class="p-head"><h2 style="color:var(--stop)">Confirm</h2><div class="hatch"></div><span class="meta">Y / N</span></div>
+        <div class="p-body">
+          <pre id="confirm-text"></pre>
+          <div class="buttons">
+            <button class="go" id="approve">Approve</button>
+            <button class="stop" id="decline">Decline</button>
+          </div>
+          <p class="muted" style="margin-top:14px">Or answer in the terminal &mdash; whichever comes first.</p>
+        </div>
+      </section>
+    </section>
+
+    <section class="panel" style="--d:.09s">
+      <div class="p-head"><h2>Conversation</h2><div class="hatch"></div><span class="meta" id="v-turns">0 turns</span></div>
+      <div class="p-body"><div id="chat"><div class="empty">Say &ldquo;Ada&rdquo; to start, or type in the terminal.</div></div></div>
+    </section>
+  </div>
+
+  <div class="rail right">
+    <section class="panel" style="--d:.16s">
+      <div class="p-head"><h2>Noticed</h2><div class="hatch"></div><span class="meta" id="v-notices">0</span></div>
+      <div class="p-body" id="notices"><p class="muted">Nothing to report.</p></div>
+    </section>
+
+    <section class="panel" style="--d:.23s">
+      <div class="p-head"><h2>Activity</h2><div class="hatch"></div></div>
+      <div class="p-body" id="activity"></div>
+    </section>
+  </div>
+
+  <div class="strip foot">
+    <span>Local only</span><span>&middot;</span><span>127.0.0.1:4173</span>
+    <span class="spacer"></span>
+    <span>Nothing here leaves this machine</span>
+  </div>
+
+</div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -204,17 +523,36 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => (
 
 let pendingId = null;
 let lastChat = "";
+let lastArmed = "";
+let runningTool = null;
 
 async function get(url) {
   try { const r = await fetch(url); return r.ok ? await r.json() : null; }
   catch { return null; }
 }
 
+// The waveform is 36 spokes around the core, built once here rather than
+// written out 36 times in the markup.
+$("wave").innerHTML = Array.from({length: 36}, (_, i) => `<i style="--i:${i}"></i>`).join("");
+
 function renderState(snap) {
-  document.body.dataset.state = snap.state || "idle";
-  $("state-label").innerHTML = snap.tool
-    ? `using <b>${esc(snap.tool)}</b>`
-    : esc(snap.status || "idle");
+  const state = snap.state || "idle";
+  document.body.dataset.state = state;
+  $("state-label").textContent = state;
+  $("top-state").textContent = state;
+  $("v-state").textContent = state;
+  runningTool = snap.tool || null;
+  // The raw status is only worth a second line when it says more than the
+  // state already does — "speaking..." under SPEAKING is noise, and the
+  // trailing dots the REPLs write mean this can't be a plain comparison.
+  // When there's nothing to add the line goes empty rather than falling back
+  // to "standing by", which is only true of idle and read as a flat
+  // contradiction under SPEAKING.
+  const detail = (snap.status || "").trim();
+  const echoes = detail.toLowerCase().replace(/[^a-z]/g, "") === state;
+  $("state-sub").textContent = snap.tool
+    ? `running ${snap.tool}`
+    : (detail && !echoes ? detail : (state === "idle" ? "standing by" : ""));
 }
 
 function renderChat(turns) {
@@ -225,17 +563,21 @@ function renderChat(turns) {
   lastChat = key;
 
   const chat = $("chat");
+  $("v-turns").textContent = `${turns.length} turn${turns.length === 1 ? "" : "s"}`;
   if (!turns.length) {
     chat.innerHTML = '<div class="empty">Say &ldquo;Ada&rdquo; to start, or type in the terminal.</div>';
     return;
   }
-  const nearBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 60;
+  // The scroller is the panel body now, not #chat itself.
+  const box = chat.parentElement;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 70;
   chat.innerHTML = turns.map(t => `
     <div class="turn ${t.role === "ada" ? "ada" : "you"}">
+      <div class="tick"></div>
       <div class="who">${t.role === "ada" ? "ada" : "you"}</div>
       <div class="said ${t.streaming ? "cursor" : ""}">${esc(t.text)}</div>
     </div>`).join("");
-  if (nearBottom) chat.scrollTop = chat.scrollHeight;
+  if (nearBottom) box.scrollTop = box.scrollHeight;
 }
 
 function renderConfirm(p) {
@@ -268,21 +610,86 @@ document.addEventListener("keydown", (e) => {
 
 async function refreshStatus() {
   const snap = await get("/api/status");
-  if (!snap) { $("state-label").textContent = "not running"; return; }
+  if (!snap) {
+    $("state-label").textContent = "offline";
+    $("state-sub").textContent = "ada isn't running";
+    return;
+  }
   renderState(snap);
   renderChat(snap.transcript || []);
   renderConfirm(snap.pending);
 }
 
+// --- the slower numbers -----------------------------------------------------
+
+function clock(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  const mm = String(Math.floor(s / 60) % 60).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return `${Math.floor(s / 3600)}:${mm}:${ss}`;
+}
+
+function renderSpend(gauges, tokens) {
+  $("v-tokens").textContent =
+    `${(tokens.input || 0).toLocaleString()} in / ${(tokens.output || 0).toLocaleString()} out`;
+
+  if (!gauges.length) {
+    $("spend").innerHTML = '<p class="muted">No limits configured.</p>';
+    $("top-spend").textContent = "spend —";
+    return;
+  }
+  $("spend").innerHTML = gauges.map(g => {
+    // A zero cap is a real setting — purchases default to it — so it's full,
+    // not a divide by zero. Anything spent against a zero cap is already over.
+    const pct = g.cap > 0 ? Math.min(100, (g.used / g.cap) * 100) : (g.used > 0 ? 100 : 0);
+    return `
+      <div class="gauge">
+        <div class="g-top">
+          <span>${esc(g.category)} &middot; ${esc(g.window)}</span>
+          <span>${esc(g.used_text)} / ${esc(g.cap_text)}</span>
+        </div>
+        <div class="g-track"><i class="${pct >= 90 ? "over" : ""}" style="width:${pct.toFixed(1)}%"></i></div>
+      </div>`;
+  }).join("");
+
+  const headline = gauges.find(g => g.category === "model" && g.window === "day") || gauges[0];
+  $("top-spend").textContent = `${headline.category} ${headline.used_text}/${headline.cap_text}`;
+}
+
+function renderArmed(names) {
+  // Re-rendered only when the set or the running tool changes, so the chips
+  // don't flicker on every poll.
+  const key = JSON.stringify([names, runningTool]);
+  if (key === lastArmed) return;
+  lastArmed = key;
+
+  $("v-armed-count").textContent = names.length;
+  $("armed").innerHTML = names.length
+    ? names.map(n => `<span class="chip ${n === runningTool ? "running" : ""}">${esc(n)}</span>`).join("")
+    : '<p class="muted">Nothing routed yet.</p>';
+}
+
+async function refreshVitals() {
+  const v = await get("/api/vitals");
+  if (!v) return;
+  $("v-uptime").textContent = clock(v.uptime);
+  $("v-messages").textContent = `${v.messages} msg`;
+  $("v-catalogue").textContent = `${v.catalogue} tools`;
+  $("top-armed").textContent = `tools ${(v.armed || []).length}/${v.catalogue}`;
+  renderSpend(v.spend || [], v.tokens || {});
+  renderArmed(v.armed || []);
+}
+
 async function refreshNotices() {
   const list = await get("/api/notices");
   if (!list) return;
+  $("v-notices").textContent = list.length;
   $("notices").innerHTML = list.length
     ? list.map(n => `
         <div class="notice">
           <span class="dot ${esc(n.level)}"></span>
-          <span style="flex:1">${esc(n.text)}</span>
-          <button onclick="dismiss(${n.id})">dismiss</button>
+          <span class="txt">${esc(n.text)}</span>
+          <button class="tiny" onclick="dismiss(${n.id})">clear</button>
         </div>`).join("")
     : '<p class="muted">Nothing to report.</p>';
 }
@@ -295,7 +702,7 @@ async function refreshHeartbeat() {
   const hb = await get("/api/heartbeat");
   if (!hb) return;
   const b = $("heartbeat-toggle");
-  b.textContent = hb.paused ? "paused — resume" : "watching — pause";
+  b.textContent = hb.paused ? "paused" : "watching";
   b.onclick = async () => {
     await fetch(`/api/heartbeat/${hb.paused ? "resume" : "pause"}`, {method: "POST"});
     refreshHeartbeat();
@@ -307,12 +714,18 @@ async function refreshActivity() {
   if (!rows) return;
   $("activity").innerHTML = rows.map(r => {
     const t = new Date((r.time || 0) * 1000).toLocaleTimeString();
-    return `<div>${esc(t)}  ${esc(r.tool || r.event || "")}</div>`;
+    return `<div><span class="t">${esc(t)}</span><span class="n">${esc(r.tool || r.event || "")}</span></div>`;
   }).join("");
 }
 
-// Status is what the orb rides on, so it's polled hard; the rest is calmer.
+function tick() { $("top-clock").textContent = new Date().toLocaleTimeString(); }
+
+// Status is what the core rides on, so it's polled hard. Money, tools and
+// history move once a turn at most, and one of them reads a file — they get
+// their own slower clock.
 refreshStatus(); setInterval(refreshStatus, 400);
+tick(); setInterval(tick, 1000);
+refreshVitals(); setInterval(refreshVitals, 2500);
 refreshNotices(); refreshHeartbeat(); refreshActivity();
 setInterval(() => { refreshNotices(); refreshHeartbeat(); refreshActivity(); }, 4000);
 </script>
