@@ -164,6 +164,65 @@ def test_find_tool_covers_things_routing_leaves_out():
     assert "make_purchase" in find_tool("buy something / spend money")
 
 
+def _after_finding(need: str, asked: str):
+    """The conversation as it stands on the *next* call, once the model has
+    given up guessing and called find_tool."""
+    return [
+        {"role": "user", "content": asked},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "name": "find_tool", "id": "t1", "input": {"need": need}}
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": find_tool(need)}
+            ],
+        },
+    ]
+
+
+def test_a_found_tool_is_actually_callable_next_call():
+    """The half of the escape hatch that was missing. Every other test here
+    checks what find_tool *returns*; the model can't act on a schema unless the
+    tool is also in the list it's sent, and it wasn't. It got the definition it
+    asked for and still had to say it couldn't help."""
+    asked = "can you turn that thing off in the other room"
+    assert "control_home_device" not in _names(_said(asked)), "precondition: routing misses"
+
+    assert "control_home_device" in _names(_after_finding("turn off a light", asked))
+
+
+def test_finding_a_tool_does_not_open_the_floodgates():
+    """The no-match answer lists every tool name as prose. Reading those back
+    as 'offered' would put all 53 in scope and undo routing for the rest of the
+    conversation."""
+    routed = _names(_after_finding("pilot a helicopter", "fly me somewhere"))
+
+    assert len(routed) < len(ALL) * 0.6
+
+
+def test_only_real_tool_names_are_picked_up():
+    """Tool results are model-adjacent data; a stray '"name": "..."' in a web
+    page or a note must not conjure a tool that doesn't exist."""
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t1",
+                    "content": '{"name": "launch_missiles", "name": "control_home_device"}',
+                }
+            ],
+        }
+    ]
+
+    assert routing.offered_in(messages, {s["name"] for s in ALL}) == {"control_home_device"}
+
+
 def test_find_tool_is_honest_when_nothing_matches():
     result = find_tool("pilot a helicopter")
 

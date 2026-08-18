@@ -117,6 +117,41 @@ def used_in(messages: list) -> set:
     return names
 
 
+# find_tool answers a match by returning the tools' full JSON definitions, so
+# every tool it offered appears as a `"name": "..."` field. Its no-match branch
+# is prose listing every tool name bare, which this deliberately doesn't match
+# — "here is everything that exists" must not drag all 53 back into scope.
+_OFFERED_NAME = re.compile(r'"name"\s*:\s*"([a-z_]+)"')
+
+
+def offered_in(messages: list, valid: set) -> set:
+    """Tools that find_tool has handed the model the definition of.
+
+    Guarantee 3 in the module docstring — the escape hatch — only holds if
+    these come back in the tool list. Without it the model gets the schema it
+    asked for, still can't call the tool, and tells the user it can't do
+    something it plainly can: the exact failure routing is supposed to make
+    impossible.
+
+    This is the one thing that can change the tool set mid-turn, which costs a
+    prompt-cache write (see ada/llm.py). It only happens on a turn where
+    routing already guessed wrong, and a cache miss is a far better outcome
+    than a false refusal.
+    """
+    names = set()
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            text = block.get("content")
+            if isinstance(text, str):
+                names |= set(_OFFERED_NAME.findall(text)) & valid
+    return names
+
+
 def _score(spec: dict, asked: set) -> int:
     """How much this tool looks like what the user just said."""
     name_words = _words(spec["name"].replace("_", " "))
@@ -141,7 +176,8 @@ def relevant(messages: list, all_specs: list) -> list:
     if len(all_specs) <= limit:
         return all_specs
 
-    keep = set(CORE) | used_in(messages)
+    valid = {spec["name"] for spec in all_specs}
+    keep = set(CORE) | used_in(messages) | offered_in(messages, valid)
     asked = _words(_recent_text(messages))
 
     scored = sorted(
