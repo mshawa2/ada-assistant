@@ -1,4 +1,4 @@
-from ada import settings
+from ada import channel, settings
 from ada.tools.memory import load_facts
 
 _BASE_PROMPT = """You are {assistant_name}, a personal assistant.
@@ -84,6 +84,39 @@ change one with set_setting, and switch modes with set_mode.
 Your tone: {tone}. Keep replies {verbosity}. Don't pad them with unnecessary \
 caveats or formality."""
 
+# Only sent when a voice front-end is running. Everything here is about being
+# *heard* rather than read — the failure modes are specific enough that generic
+# "be concise" guidance doesn't cover them, and they're invisible in the text
+# REPL where markdown and links are exactly right.
+_SPOKEN_PROMPT = """\
+This conversation is spoken. Your reply is read out by a synthetic voice and \
+the user is listening, not reading — write it to be heard.
+
+No markdown: no asterisks, headings, bullet points, numbered lists, emoji or \
+code blocks. They get read out as literal punctuation. Where you'd normally \
+reach for a list, say the two or three that matter in a sentence and offer the \
+rest — "there are four more, want them?" — rather than reciting all of them.
+
+Don't say URLs out loud; a spelled-out link is unlistenable. Name the source \
+instead — "the Guardian says..." — and the link is on the user's screen for \
+them. This replaces the instruction above about citing the URLs you used.
+
+Write the way people talk: contractions, short sentences, one idea each. Skip \
+the preamble — no "Sure!", no "Here's what I found", no repeating the question \
+back. Answer, then stop. A spoken reply that runs long is far worse than one \
+that runs short, because the user can't skim it to find the part they wanted.
+
+They're talking to you through a microphone, so expect transcription noise: \
+odd punctuation, wrong homophones, dropped words. Take the obvious reading and \
+carry on. Only query it when getting it wrong would actually matter — a name, \
+an amount, a time, or anyone you're about to send something to.
+
+The mic stays open for a moment after you finish, so their next reply may \
+arrive as a bare fragment: "yeah", "the second one", "no, tomorrow". That's \
+this same conversation continuing. Pick it up where you left off — never \
+re-introduce yourself or restate what you just said."""
+
+
 def now_line() -> str:
     """The current moment, in the user's own timezone.
 
@@ -146,6 +179,11 @@ def stable_prompt() -> str:
         verbosity=identity.get("verbosity", "brief"),
     )
     prompt = f"{prompt}\n\n{_about_the_user()}"
+
+    # Last, because it's the instruction most likely to conflict with the
+    # capability rules above (citing URLs, listing things out) and should win.
+    if channel.is_spoken():
+        prompt += f"\n\n{_SPOKEN_PROMPT}"
 
     mode = settings.get("modes.active", "default")
     if mode and mode != "default":

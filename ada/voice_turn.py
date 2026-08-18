@@ -15,7 +15,47 @@ from ada import status as ada_status
 from ada.llm import LLMError
 from ada.tts import TTSError, speak
 
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+# Sentences are handed to TTS one at a time, so a split is an audible pause.
+# Splitting on every ". " puts one in the middle of "at 3 p.m. tomorrow" or
+# "Dr. Patel called" — the giveaway that a voice is synthetic. These are the
+# words that end in a full stop without ending the sentence.
+_ABBREVIATIONS = frozenset(
+    """mr mrs ms dr prof rev sr jr st vs etc al approx dept est fig vol no
+    a.m p.m e.g i.e u.s u.k""".split()
+)
+
+# A boundary is punctuation, then whitespace, then something that looks like
+# the start of a new sentence. Requiring the capital rules out "e.g. this"
+# without needing to know the abbreviation.
+_BOUNDARY = re.compile(r"""(?<=[.!?])["')\]]*\s+(?=["'(\[]*[A-Z0-9])""")
+_TRAILING_WORD = re.compile(r"""([A-Za-z][A-Za-z.]*)\.["')\]]*\s*$""")
+
+
+def _ends_a_sentence(text: str) -> bool:
+    """Whether `text` really finishes on a full stop, or just looks like it."""
+    match = _TRAILING_WORD.search(text)
+    if not match:
+        return True  # ends on '?', '!' or a digit — a real boundary
+    word = match.group(1).lower()
+    # A single letter is an initial: "J. R. Hartley" is a name, not three
+    # sentences. Erring towards merging is the safe direction — the cost is a
+    # slightly longer chunk of speech, where the cost of erring the other way
+    # is a hard pause in the middle of a phrase.
+    return word not in _ABBREVIATIONS and len(word.rstrip(".")) > 1
+
+
+def _complete_sentences(buffer: str) -> tuple[list[str], str]:
+    """Splits off whatever whole sentences `buffer` holds, returning them and
+    the unfinished remainder to keep buffering."""
+    sentences, start = [], 0
+    for match in _BOUNDARY.finditer(buffer):
+        candidate = buffer[start : match.start()]
+        if not _ends_a_sentence(candidate):
+            continue
+        if candidate.strip():
+            sentences.append(candidate.strip())
+        start = match.end()
+    return sentences, buffer[start:]
 
 
 def confirm(message: str) -> bool:
@@ -60,12 +100,9 @@ def run_spoken_turn(
         buffer += chunk
         full_reply += chunk
         ada_status.stream(chunk)
-        parts = _SENTENCE_END.split(buffer)
-        if len(parts) > 1:
-            for sentence in parts[:-1]:
-                if sentence.strip():
-                    speech_queue.put(sentence.strip())
-            buffer = parts[-1]
+        sentences, buffer = _complete_sentences(buffer)
+        for sentence in sentences:
+            speech_queue.put(sentence)
         if interrupt_check() or ada_interrupt.requested():
             interrupted.set()
 

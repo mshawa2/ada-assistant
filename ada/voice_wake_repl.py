@@ -14,7 +14,7 @@ cancellation her own voice could false-trigger that. Interrupt with Ctrl-C.
 import re
 import threading
 
-from ada import cost, session, settings
+from ada import channel, cost, session, settings
 from ada import interrupt as ada_interrupt
 from ada import status as ada_status
 from ada.audio import listen_for_utterance
@@ -65,6 +65,10 @@ def _print_cost_summary() -> None:
 
 
 def run() -> None:
+    # Everything here is read out loud, so the prompt should write for the ear
+    # rather than the screen. See ada/channel.py.
+    channel.use_voice()
+
     window = _followup_window()
     print('Ada (wake word) is up. Just say "Ada" followed by what you need.')
     if window:

@@ -1,6 +1,6 @@
 import threading
 
-from ada import cost, session
+from ada import channel, cost, session
 from ada import interrupt as ada_interrupt
 from ada import status as ada_status
 from ada.audio import enter_pressed, record_until_enter
@@ -19,6 +19,9 @@ def _print_cost_summary() -> None:
 
 
 def run() -> None:
+    # See ada/channel.py — replies here are spoken, not read.
+    channel.use_voice()
+
     print("Ada (voice) is up. Press Enter to start talking, Enter again to stop. Ctrl-C to quit.\n")
 
     # See ada/interrupt.py — sounddevice's blocking calls don't reliably let a
