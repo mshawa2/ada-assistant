@@ -55,11 +55,21 @@ def record_until_enter() -> bytes:
     return buf.getvalue()
 
 
-def listen_for_utterance(should_ignore: Callable[[], bool]) -> bytes:
+def listen_for_utterance(
+    should_ignore: Callable[[], bool],
+    give_up_after: float | None = None,
+) -> bytes:
     """Blocks until it captures one spoken utterance — speech, then a pause
     — using local voice-activity detection. No audio is sent anywhere until
     this returns; nothing at all is processed while `should_ignore()` is
     True (e.g. Ada is speaking), so she never reacts to her own voice.
+
+    `give_up_after` bounds only the wait *before* anyone starts talking, and
+    returns b"" if nobody does. Once speech has started the utterance always
+    runs to its natural end — a clock that could cut someone off mid-sentence
+    would be worse than no clock. Time spent ignoring Ada's own voice doesn't
+    count against it either, or a window would expire while she was still
+    answering the thing it was opened for.
     """
     vad = webrtcvad.Vad(_VAD_AGGRESSIVENESS)
     prebuffer: collections.deque[bytes] = collections.deque(maxlen=_PREBUFFER_FRAMES)
@@ -67,6 +77,7 @@ def listen_for_utterance(should_ignore: Callable[[], bool]) -> bytes:
     triggered = False
     silence_run = 0
     speech_run = 0
+    frames_waited = 0
 
     with sd.RawInputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="int16") as stream:
         while True:
@@ -82,6 +93,11 @@ def listen_for_utterance(should_ignore: Callable[[], bool]) -> bytes:
                 silence_run = 0
                 speech_run = 0
                 continue
+
+            if not triggered and give_up_after is not None:
+                frames_waited += 1
+                if frames_waited * _VAD_FRAME_MS / 1000 >= give_up_after:
+                    return b""
 
             is_speech = vad.is_speech(frame, SAMPLE_RATE)
 

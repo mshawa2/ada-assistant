@@ -14,7 +14,7 @@ cancellation her own voice could false-trigger that. Interrupt with Ctrl-C.
 import re
 import threading
 
-from ada import cost, session
+from ada import cost, session, settings
 from ada import interrupt as ada_interrupt
 from ada import status as ada_status
 from ada.audio import listen_for_utterance
@@ -44,6 +44,20 @@ def _strip_wake_word(text: str) -> str | None:
     return stripped[match.end() :].strip()
 
 
+def _followup_window() -> float:
+    """Seconds Ada keeps listening after she speaks, so a follow-up doesn't
+    need her name again. 0 means the wake word is always required.
+
+    A value that isn't a number fails to 0 rather than to the default: the
+    stricter behaviour is the safe direction for anything deciding when a
+    microphone is live.
+    """
+    try:
+        return max(0.0, float(settings.get("voice.followup_seconds", 30)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _print_cost_summary() -> None:
     summary = cost.summary()
     if summary:
@@ -51,7 +65,14 @@ def _print_cost_summary() -> None:
 
 
 def run() -> None:
-    print('Ada (wake word) is up. Just say "Ada" followed by what you need. Ctrl-C to quit.\n')
+    window = _followup_window()
+    print('Ada (wake word) is up. Just say "Ada" followed by what you need.')
+    if window:
+        # Worth saying, because it's the difference between talking to her and
+        # addressing her: the wake word only starts a conversation now.
+        print(f"After she answers, keep talking — no need to say her name for {window:g}s. Ctrl-C to quit.\n")
+    else:
+        print("Ctrl-C to quit.\n")
 
     # Installed once, up front: sounddevice's blocking mic/speaker calls don't
     # reliably let a raised KeyboardInterrupt propagate, so Ctrl-C is handled
@@ -77,19 +98,36 @@ def run() -> None:
             speaking.clear()
 
     messages = session.load()
-    pending_command = False  # True right after "Ada" alone was said, waiting for the follow-up
+
+    # How the next thing she hears is treated. False means she needs her name
+    # first. True means she's still in the conversation and takes what she hears
+    # as a command — with `open_mic_seconds` bounding how long that lasts, or
+    # None to wait indefinitely because she asked a question and is owed an
+    # answer.
+    open_mic = False
+    open_mic_seconds: float | None = None
 
     try:
         while not ada_interrupt.requested():
-            if pending_command:
+            if open_mic:
                 ada_status.set_status("listening...")
             else:
                 print('listening for "Ada"...')
                 ada_status.set_status('listening for "Ada"...')
 
-            wav = listen_for_utterance(should_ignore=speaking.is_set)
+            wav = listen_for_utterance(
+                should_ignore=speaking.is_set,
+                give_up_after=open_mic_seconds if open_mic else None,
+            )
             if ada_interrupt.requested():
                 break
+
+            if not wav:
+                # The follow-up window closed with nothing said. Back to needing
+                # her name, without announcing it — the conversation just ended
+                # the way conversations do.
+                open_mic = False
+                continue
 
             ada_status.set_status("transcribing...")
             try:
@@ -101,9 +139,14 @@ def run() -> None:
             if ada_interrupt.requested() or not text.strip():
                 continue
 
-            if pending_command:
-                command = text.strip()
-                pending_command = False
+            if open_mic:
+                # Mid-conversation, but people say her name out of habit anyway
+                # — strip it if it's there rather than sending "Ada, ..." along
+                # as part of the request.
+                command = _strip_wake_word(text)
+                if command is None:
+                    command = text.strip()
+                open_mic = False
             else:
                 command = _strip_wake_word(text)
                 if command is None:
@@ -119,7 +162,7 @@ def run() -> None:
                     print(f"[voice error: {e}]")
                 finally:
                     speaking.clear()
-                pending_command = True
+                open_mic, open_mic_seconds = True, None
                 continue
 
             print(f'you said: "{command}"')
@@ -128,9 +171,18 @@ def run() -> None:
             interrupted, reply = run_spoken_turn(messages, interrupt_check=lambda: False, speaking=speaking)
             session.record(messages)
 
-            # If Ada just asked a question, listen for the answer directly next
-            # time around — no need to say the wake word again to reply to her.
-            pending_command = (not interrupted) and reply.rstrip().endswith("?")
+            # Stay in the conversation rather than making them say her name
+            # again for every sentence. A question waits indefinitely — she
+            # asked it, so she waits for the answer. Anything else gets a
+            # bounded window, because a mic that never closes is a different
+            # product in a room with other people in it.
+            if interrupted:
+                open_mic = False
+            elif reply.rstrip().endswith("?"):
+                open_mic, open_mic_seconds = True, None
+            else:
+                open_mic_seconds = _followup_window()
+                open_mic = open_mic_seconds > 0
     except (EOFError, KeyboardInterrupt):
         # Backstop, not the primary mechanism: if a KeyboardInterrupt ever does
         # get raised cleanly (some path other than the confirmed-broken

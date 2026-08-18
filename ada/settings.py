@@ -169,6 +169,18 @@ DEFAULTS: dict[str, Any] = {
         # "auto" picks Brave or Tavily if their key is in .env, else Wikipedia.
         "provider": "auto",
     },
+    "voice": {
+        # How long Ada keeps listening after she finishes speaking, so a
+        # follow-up doesn't need her name again. Saying "Ada" before every
+        # sentence of a conversation is the wrong shape for a conversation.
+        #
+        # The window costs nothing when nothing is said — voice detection is
+        # local, and an empty window never reaches a paid service. What it
+        # costs is the risk of picking up speech that wasn't meant for her, so
+        # it's a window rather than an always-open mic. 0 turns it off and
+        # makes the wake word mandatory again.
+        "followup_seconds": 30,
+    },
     "notifications": {
         "channels": ["terminal", "macos"],
         "push_levels": ["urgent", "critical"],
