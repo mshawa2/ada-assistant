@@ -27,6 +27,8 @@ def reset_session_tally(monkeypatch):
     """cost.py keeps a module-level tally; don't let it leak between tests."""
     monkeypatch.setattr(cost, "_input_tokens", 0)
     monkeypatch.setattr(cost, "_output_tokens", 0)
+    monkeypatch.setattr(cost, "_cache_read_tokens", 0)
+    monkeypatch.setattr(cost, "_cache_write_tokens", 0)
 
 
 # --- the ledger -------------------------------------------------------------

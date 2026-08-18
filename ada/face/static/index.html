@@ -630,8 +630,13 @@ function clock(seconds) {
 }
 
 function renderSpend(gauges, tokens) {
+  // The cached count only appears once there is one — on a cold session it
+  // would just be a zero taking up room, and it's the one number here that
+  // says whether the prompt cache is actually being hit.
+  const cached = tokens.cached || 0;
   $("v-tokens").textContent =
-    `${(tokens.input || 0).toLocaleString()} in / ${(tokens.output || 0).toLocaleString()} out`;
+    `${(tokens.input || 0).toLocaleString()} in / ${(tokens.output || 0).toLocaleString()} out`
+    + (cached ? ` · ${cached.toLocaleString()} cached` : "");
 
   if (!gauges.length) {
     $("spend").innerHTML = '<p class="muted">No limits configured.</p>';

@@ -267,7 +267,7 @@ def test_vitals_carries_every_number_the_deck_draws(client):
     body = client.get("/api/vitals").get_json()
 
     assert set(body) == {"uptime", "armed", "catalogue", "messages", "spend", "tokens"}
-    assert set(body["tokens"]) == {"input", "output", "cost"}
+    assert set(body["tokens"]) == {"input", "output", "cached", "written", "cost"}
     assert body["uptime"] >= 0
 
 

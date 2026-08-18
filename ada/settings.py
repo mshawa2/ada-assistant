@@ -67,8 +67,16 @@ DEFAULTS: dict[str, Any] = {
         "conversation": "claude-sonnet-5",
         "max_tokens": 4096,
         # Per million tokens. Here rather than hardcoded so a price change is
-        # a config edit; the token counts are exact either way.
-        "pricing": {"input_per_mtok": 2.00, "output_per_mtok": 10.00},
+        # a config edit; the token counts are exact either way. The cache
+        # figures are multipliers on the input price rather than prices of
+        # their own, because that's how they're published — a read costs a
+        # tenth of sending the tokens fresh, a write a little more than once.
+        "pricing": {
+            "input_per_mtok": 2.00,
+            "output_per_mtok": 10.00,
+            "cache_read_multiplier": 0.10,
+            "cache_write_multiplier": 1.25,
+        },
     },
     "budget": {
         "currency": "USD",

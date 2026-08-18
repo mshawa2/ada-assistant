@@ -52,7 +52,8 @@ that's send_message or compose_email, and either will ask them first.
 Reminders can actually alert the user, but only if you pin down an exact time. \
 Whenever a request implies any timing at all — "tomorrow", "Friday", "in an \
 hour", "at 3", "tonight", "next week" — work out the real date and time from \
-the current date above and pass it as due_at in ISO 8601 local time (e.g. \
+the current date and time you've been given, and pass it as due_at in ISO 8601 \
+local time (e.g. \
 '2026-08-15T15:00'). A reminder without due_at never alerts; it just sits on \
 the list. If a time is ambiguous ("Friday" when it's already Friday evening, \
 or "at 8" with no am/pm), ask rather than guessing. Use snooze_reminder when \
@@ -83,14 +84,20 @@ change one with set_setting, and switch modes with set_mode.
 Your tone: {tone}. Keep replies {verbosity}. Don't pad them with unnecessary \
 caveats or formality."""
 
-
-def _now_line() -> str:
+def now_line() -> str:
     """The current moment, in the user's own timezone.
 
-    Rebuilt on every model call (this whole prompt is), so it stays correct
-    across a long-running session rather than freezing at startup. Without it
-    Ada can't turn "tomorrow at 3" into a timestamp the heartbeat can fire on
-    — and would have to guess what day it is.
+    Rebuilt on every model call, so it stays correct across a long-running
+    session rather than freezing at startup. Without it Ada can't turn
+    "tomorrow at 3" into a timestamp the heartbeat can fire on — and would have
+    to guess what day it is.
+
+    Kept apart from `stable_prompt()` because a clock is the one thing in here
+    that changes every minute, and prompt caching is a prefix match: anything
+    volatile above the breakpoint invalidates everything below it. Sent as its
+    own block *after* the cached prefix, a ticking minute costs nothing. Sent
+    inline — as it was — it re-bills the whole prompt and every tool schema at
+    full price on every single call.
     """
     now = settings.now()
     return f"The current date and time is {now.strftime('%A %d %B %Y, %H:%M')} ({now.tzname()})."
@@ -124,14 +131,21 @@ def _about_the_user() -> str:
     return " ".join(lines)
 
 
-def build_system_prompt() -> str:
+def stable_prompt() -> str:
+    """Everything in the prompt that is the same from one call to the next.
+
+    "Stable" doesn't mean frozen — settings, mode and remembered facts all
+    change. It means nothing in here changes *on its own*: it only moves when
+    the user moves it, so the cache survives a whole conversation and pays a
+    cold write on the rare turn that changes something.
+    """
     identity = settings.load().get("identity", {})
     prompt = _BASE_PROMPT.format(
         assistant_name=identity.get("assistant_name", "Ada"),
         tone=identity.get("tone", "playful and witty"),
         verbosity=identity.get("verbosity", "brief"),
     )
-    prompt = f"{prompt}\n\n{_now_line()} {_about_the_user()}"
+    prompt = f"{prompt}\n\n{_about_the_user()}"
 
     mode = settings.get("modes.active", "default")
     if mode and mode != "default":

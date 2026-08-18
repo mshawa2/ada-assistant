@@ -3,7 +3,7 @@
     "assistant_name": "Ada",
     "user_name": "Mansur",
     "user_pronouns": "",
-    "tone": "playful and witty — warm, brief, a little fun, never stiff or corporate",
+    "tone": "playful and witty \u2014 warm, brief, a little fun, never stiff or corporate",
     "verbosity": "brief"
   },
   "locale": {
@@ -16,7 +16,9 @@
     "max_tokens": 4096,
     "pricing": {
       "input_per_mtok": 2.0,
-      "output_per_mtok": 10.0
+      "output_per_mtok": 10.0,
+      "cache_read_multiplier": 0.1,
+      "cache_write_multiplier": 1.25
     }
   },
   "budget": {

@@ -2,9 +2,8 @@ from collections.abc import Iterator
 
 import anthropic
 
-from ada import audit, budget, cost, settings
+from ada import audit, budget, cost, settings, system_prompt
 from ada.config import ANTHROPIC_API_KEY
-from ada.system_prompt import build_system_prompt
 
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -15,6 +14,29 @@ _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 # cut off, and the default ceiling is high enough that it rarely is.
 DEFAULT_MODEL = "claude-sonnet-5"
 DEFAULT_MAX_TOKENS = 4096
+
+
+def _system() -> list[dict]:
+    """The system prompt, split at the cache breakpoint.
+
+    Everything the provider bills is a prefix: tool schemas, then system, then
+    the conversation. A cache breakpoint says "I will send these exact bytes
+    again" — so it goes at the end of the last thing that doesn't move, and
+    everything volatile goes after it.
+
+    Here that's ~6,800 tokens above the line (the prompt plus whichever tool
+    schemas routing picked) and one clock tick below it. Cached reads bill at a
+    tenth of the rate, and a turn is two calls or more — the second one onward
+    reads what the first one wrote.
+    """
+    return [
+        {
+            "type": "text",
+            "text": system_prompt.stable_prompt(),
+            "cache_control": {"type": "ephemeral"},
+        },
+        {"type": "text", "text": system_prompt.now_line()},
+    ]
 
 
 class LLMError(Exception):
@@ -42,18 +64,27 @@ def stream_turn(messages: list[dict], tools: list[dict]) -> Iterator[str]:
         with _client.messages.stream(
             model=settings.get("model.conversation", DEFAULT_MODEL),
             max_tokens=settings.get("model.max_tokens", DEFAULT_MAX_TOKENS),
-            system=build_system_prompt(),
+            system=_system(),
             messages=messages,
             tools=tools,
         ) as stream:
             yield from stream.text_stream
             final_message = stream.get_final_message()
-            cost.record(final_message.usage.input_tokens, final_message.usage.output_tokens)
+            usage = final_message.usage
+            # Cached tokens are reported apart from `input_tokens`, which counts
+            # only what was billed at full rate. Reading them back is also the
+            # one honest way to know caching is working: a cache_read of 0 on
+            # every call means something above the breakpoint is moving.
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+            cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cost.record(usage.input_tokens, usage.output_tokens, cache_read, cache_write)
             audit.log(
                 "model_call",
                 stop_reason=final_message.stop_reason,
-                input_tokens=final_message.usage.input_tokens,
-                output_tokens=final_message.usage.output_tokens,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
             )
             return final_message
     except anthropic.APIConnectionError as e:
