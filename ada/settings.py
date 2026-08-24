@@ -140,6 +140,7 @@ DEFAULTS: dict[str, Any] = {
             # fills, which is a real failure mode for a tool that always succeeds.
             "start_job": {"per_minute": 5, "per_hour": 30, "per_day": 100},
             "resolve_approval": {"per_minute": 3, "per_hour": 20, "per_day": 60},
+            "schedule_job": {"per_minute": 3, "per_hour": 15, "per_day": 40},
         },
     },
     "purchasing": {

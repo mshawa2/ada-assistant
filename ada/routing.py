@@ -51,6 +51,7 @@ CORE = {
     "get_weather",
     "list_notices",
     "list_jobs",
+    "list_schedules",
     "resolve_approval",
 }
 
@@ -75,6 +76,7 @@ _HINTS = {
     "heartbeat": ["quiet", "proactive", "background"],
     "job": ["background", "queue", "queued", "later", "progress", "underway", "still"],
     "approval": ["approve", "approval", "blocked", "permission"],
+    "schedule": ["recurring", "repeat", "daily", "weekly", "automatically", "morning", "routine"],
 }
 
 _WORD = re.compile(r"[a-z0-9]+")

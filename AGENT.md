@@ -15,7 +15,7 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-59 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+62 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
@@ -33,6 +33,7 @@ depending on the arguments (a lock, not a lamp). Everything else runs freely.
 | Memory | `forget` ⚠️, `list_memory`, `remember`, `update_memory` |
 | Background jobs | `cancel_job`, `job_status`, `list_jobs`, `start_job` |
 | Approvals | `list_approvals`, `resolve_approval` ⚠️ |
+| Recurring work | `list_schedules`, `manage_schedule`, `schedule_job` |
 | Ada herself | `dismiss_notice`, `find_tool`, `get_settings`, `heartbeat`, `list_modes`, `list_notices`, `set_mode`, `set_setting` ⚠️ |
 
 ## How Ada is held back
@@ -1414,10 +1415,7 @@ file holds real jobs means migrating records that already exist:
 
 1. ~~The approval queue.~~ **Built.**
 2. ~~The executor.~~ **Built.**
-3. **A real scheduler.** `run_at` is already honoured by `claim()`; what's
-   missing is recurrence, one-shot times, backoff on failure, and a
-   `schedule_job` tool so Ada can install her own daemons instead of the
-   hardcoded `CHECKS` dict.
+3. ~~A real scheduler.~~ **Built.**
 4. **Context paging** — summarize the dropped session prefix, and give each job
    its own persisted transcript rather than starting its turn over every run.
 
@@ -1591,6 +1589,75 @@ taken twice are exactly the ones that stop and ask, and a grant is matched to
 exact arguments — but it's the strongest argument for persisting a job's
 transcript, which is what the next tier is for.
 
+## Recurring work (built and verified, including against a real model)
+
+`run_at` on a job already says "not before three". What it can't say is "every
+morning at eight", and there was nowhere to put that — a job is one piece of
+work with one outcome, and a thing that happens every day is not one piece of
+work.
+
+### A schedule is a template; firing it creates a job
+
+That's the crontab-versus-process distinction, and keeping them apart is what
+makes "what did the 8am briefing say on Tuesday?" a question with an answer.
+Each run is its own record with its own result and its own history. Re-arming a
+single job would overwrite yesterday's answer with today's — and `done` is
+terminal for good reasons besides.
+
+It also means a schedule inherits everything a job already has, for free:
+claiming, parking for approval, the tool allowlist, the budget slice, orphan
+recovery. `ada/heartbeat/scheduler.py` is the smallest tier in the whole system
+— it notices a template is due, creates a job, arms the template for next time,
+and knows nothing about what any of that means. Firing is a JSON write, so
+unlike the executor it has no per-tick cap; the executor still paces the part
+that costs money.
+
+### The vocabulary is deliberately small
+
+`hourly`, `daily`, `weekly`, `monthly`, and a raw `every_seconds` (minimum 60 —
+below that it's a loop, and each run costs a model call). No cron expressions:
+that's a parser or a dependency, for one user who wants a morning briefing and
+a Sunday review. Same trade `routing.py` makes with lexical scoring over
+embeddings — the small thing does the real job, and what it can't express is
+written down rather than half-supported.
+
+**What it can't express:** "every weekday", "the last Friday of the month",
+"every 15 minutes past the hour". `every_seconds` covers the third crudely. The
+first two need a real cron parser, and that's the moment to add one.
+
+Monthly days are capped at **28**. February is why, and "the nearest real day"
+is a guess about what someone meant.
+
+### Missed runs fire once, not once per occurrence
+
+Next-run is computed from *now* rather than from the missed due time, so a
+laptop opened after a week away produces one briefing and resumes the rhythm
+— not seven identical ones. Resuming a paused schedule re-arms from now for the
+same reason.
+
+### Backoff, and knowing when not to bother
+
+A job that breaks no longer fails outright. It's requeued with a growing delay
+(1 min, 5 min, 30 min) until `MAX_ATTEMPTS`, keeping the error visible while it
+waits so a job stuck in a retry loop looks like what it is. **No notice per
+retry** — a transient failure that fixes itself isn't news, and one notice per
+attempt trains the user to ignore the log. The final failure still speaks up.
+
+One thing is never retried: a breached spending cap. It will fail identically
+until the user raises the limit or the window rolls over, and burning three
+attempts against it just means the real error is three retries stale by the
+time anyone reads it. That's decided on the exception's **cause**, not its
+wording — `llm.py` wraps `BudgetExceeded` in an `LLMError`, and matching on the
+message is how a reworded error silently becomes retryable.
+
+### Verified live
+
+A daily schedule, forced due, through the whole chain on a throwaway data
+directory: `run_schedules` created a job that inherited the template's
+`tools=["get_weather"]` and `budget_usd=0.25`, `run_jobs` ran it against the
+real model and finished with a real answer, and the schedule re-armed itself
+for the next morning. **$0.0075.**
+
 ## Consolidation notes
 
 The sections above are in **build order**, not importance order — each records
@@ -1652,6 +1719,12 @@ Recorded so they're a decision rather than an oversight:
   job mid-turn.
 - **A grant never expires.** One-shot and argument-exact, but a job approved
   and then left unclaimed keeps its grant indefinitely.
+- **Schedules can't express "every weekday" or "the last Friday".** The small
+  vocabulary is a considered trade; a real cron parser is the answer when it
+  stops being one.
+- **A schedule that fires while its previous job is still running** creates a
+  second job rather than skipping or queueing behind it. Fine at hourly and
+  slower; visible if someone sets `every_seconds` near the runtime of the work.
 - **Music is library-only and Apple Music only** — Ada can play what the user
   has added, not the whole streaming catalogue, and says so rather than
   implying otherwise.

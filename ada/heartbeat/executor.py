@@ -46,7 +46,7 @@ is matched to exact arguments. It is still the strongest argument for
 persisting a job's transcript, which is the next tier's job.
 """
 
-from ada import approvals, audit, cost, jobs
+from ada import approvals, audit, budget, cost, jobs
 from ada.heartbeat.notices import add_notice
 
 # What the user sees of a result before it's cut short. A notice is a nudge to
@@ -108,6 +108,21 @@ def _preview(text: str) -> str:
     return text if len(text) <= RESULT_PREVIEW else text[:RESULT_PREVIEW].rstrip() + "…"
 
 
+def _worth_retrying(error: Exception) -> bool:
+    """Whether trying again could plausibly go differently.
+
+    A rate limit or a dropped connection will. A breached spending cap won't —
+    it will fail identically until the user raises the limit or the window
+    rolls over, and burning the job's attempts against it just means the real
+    error is three retries stale by the time anyone reads it.
+
+    Checked on the cause rather than the message: `llm.py` wraps
+    `BudgetExceeded` in an `LLMError`, and matching on wording is how a
+    reworded error silently becomes retryable.
+    """
+    return not isinstance(getattr(error, "__cause__", None), budget.BudgetExceeded)
+
+
 def run_one(job: dict, level: str = "urgent") -> str:
     """Give one claimed job a turn. Returns the state it ended in."""
     # Imported here rather than at module scope: `ada.agent` pulls in the whole
@@ -141,14 +156,23 @@ def run_one(job: dict, level: str = "urgent") -> str:
             audit.log("job_parked", job=job_id)
             return jobs.WAITING_APPROVAL
         except Exception as e:
-            # Includes LLMError, which is how being over the global spending
-            # cap arrives here. A background job is not a good enough reason to
-            # blow through a limit the user set.
             jobs.record_spend(job_id, spent_so_far())
-            jobs.fail(job_id, str(e) or e.__class__.__name__)
-            audit.log("job_failed", job=job_id, error=str(e))
-            add_notice("jobs", f"Job #{job_id} failed: {job['task']} — {e}", level=level)
-            return jobs.FAILED
+            reason = str(e) or e.__class__.__name__
+            attempts = job.get("attempts", 1)
+
+            if not _worth_retrying(e) or attempts >= jobs.MAX_ATTEMPTS:
+                jobs.fail(job_id, reason)
+                audit.log("job_failed", job=job_id, error=reason)
+                add_notice("jobs", f"Job #{job_id} failed: {job['task']} — {reason}", level=level)
+                return jobs.FAILED
+
+            delay = jobs.backoff_for(attempts)
+            jobs.retry_later(job_id, delay, reason)
+            # Deliberately no notice: a transient failure that fixes itself on
+            # the next attempt isn't news, and a notice per retry would train
+            # the user to ignore the log. The final failure still speaks up.
+            audit.log("job_retrying", job=job_id, error=reason, in_seconds=delay)
+            return jobs.PENDING
 
         jobs.record_spend(job_id, spent_so_far())
 

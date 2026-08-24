@@ -95,6 +95,11 @@
         "per_minute": 3,
         "per_hour": 20,
         "per_day": 60
+      },
+      "schedule_job": {
+        "per_minute": 3,
+        "per_hour": 15,
+        "per_day": 40
       }
     }
   },
@@ -163,6 +168,10 @@
         "interval_seconds": 60,
         "max_jobs_per_tick": 1,
         "level": "urgent"
+      },
+      "run_schedules": {
+        "enabled": true,
+        "interval_seconds": 60
       }
     }
   },

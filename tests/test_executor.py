@@ -7,7 +7,9 @@ good enough reason to blow through a cap the user set.
 
 import pytest
 
-from ada import agent, approvals, cost, jobs, safety
+import time
+
+from ada import agent, approvals, budget, cost, jobs, safety
 from ada.heartbeat import executor, notices
 from ada.llm import LLMError
 from ada.tools import reminders
@@ -134,29 +136,70 @@ def test_an_approved_job_runs_the_action_through_on_its_next_turn(monkeypatch, s
 # --- breaking ---------------------------------------------------------------
 
 
-def test_a_job_that_breaks_fails_with_the_error_kept(monkeypatch, sent_notifications):
+def _breaks_with(error):
     def explode(messages, tools):
-        raise LLMError("Rate limited by the model provider.")
+        raise error
 
-    monkeypatch.setattr(agent, "stream_turn", explode)
+    return explode
 
-    assert executor.run_one(_queued()) == jobs.FAILED
-    assert "Rate limited" in jobs.get(1)["error"]
+
+def test_something_transient_is_retried_later_rather_than_failed(monkeypatch, sent_notifications):
+    monkeypatch.setattr(agent, "stream_turn", _breaks_with(LLMError("Rate limited by the provider.")))
+
+    assert executor.run_one(_queued()) == jobs.PENDING
+
+    stored = jobs.get(1)
+    assert stored["state"] == jobs.PENDING
+    assert "Rate limited" in stored["error"], "the error stays visible while it waits"
+    assert stored["run_at"] > time.time(), "and it isn't tried again on this tick"
+
+
+def test_a_retry_is_not_announced_but_the_final_failure_is(monkeypatch, sent_notifications):
+    """A transient failure that fixes itself next attempt isn't news, and a
+    notice per retry trains the user to ignore the log."""
+    monkeypatch.setattr(agent, "stream_turn", _breaks_with(LLMError("boom")))
+
+    executor.run_one(_queued())
+    assert notices.list_notices() == []
+
+    for _ in range(jobs.MAX_ATTEMPTS - 1):
+        jobs.retry(1) if jobs.get(1)["state"] == jobs.FAILED else None
+        job = jobs.claim(now=time.time() + 10_000)
+        executor.run_one(job)
+
+    assert jobs.get(1)["state"] == jobs.FAILED
     assert "failed" in notices.list_notices()[0]["text"]
 
 
-def test_being_over_the_global_budget_fails_the_job_rather_than_spending(monkeypatch, sent_notifications):
-    """LLMError is how a breached spending cap arrives. A background job is not
-    a good enough reason to blow through a limit the user set."""
+def test_backoff_grows_rather_than_burning_every_attempt_at_once():
+    assert jobs.backoff_for(1) < jobs.backoff_for(2) < jobs.backoff_for(3)
+    assert jobs.backoff_for(99) == jobs.backoff_for(jobs.MAX_ATTEMPTS), "clamped, not indexed off the end"
 
-    def over(messages, tools):
-        raise LLMError("Spending limit reached for 'model'.")
 
-    monkeypatch.setattr(agent, "stream_turn", over)
+def test_being_over_the_global_budget_is_not_retried(monkeypatch, sent_notifications):
+    """A breached cap will fail identically until the user raises it or the
+    window rolls over. Burning the attempts against it just means the real
+    error is three retries stale by the time anyone reads it."""
+    cause = budget.BudgetExceeded("Spending limit reached for 'model'.")
+    wrapped = LLMError(str(cause))
+    wrapped.__cause__ = cause
+
+    monkeypatch.setattr(agent, "stream_turn", _breaks_with(wrapped))
     executor.run_one(_queued())
 
-    assert jobs.get(1)["state"] == jobs.FAILED
+    assert jobs.get(1)["state"] == jobs.FAILED, "failed outright, not queued to fail again"
     assert "Spending limit" in jobs.get(1)["error"]
+
+
+def test_the_retry_decision_reads_the_cause_not_the_wording():
+    """llm.py wraps BudgetExceeded in an LLMError; matching on the message is
+    how a reworded error silently becomes retryable."""
+    plain = LLMError("Spending limit reached for 'model'.")
+    assert executor._worth_retrying(plain) is True, "same words, no cause — nothing to go on"
+
+    wrapped = LLMError("something else entirely")
+    wrapped.__cause__ = budget.BudgetExceeded("x")
+    assert executor._worth_retrying(wrapped) is False
 
 
 # --- money ------------------------------------------------------------------

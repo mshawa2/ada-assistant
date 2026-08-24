@@ -7,6 +7,7 @@ import time
 
 from ada import store
 from ada.heartbeat.executor import run_jobs
+from ada.heartbeat.scheduler import run_schedules
 from ada.heartbeat.notices import add_notice
 from ada.heartbeat.state import get_check_state, update_check_state
 from ada.tools.reminders import load_reminders, mark_due_notified, mark_stale_notified
@@ -103,4 +104,6 @@ CHECKS = {
     # The one check that isn't an observation: it does work, with tools, while
     # nobody is watching. See ada/heartbeat/executor.py.
     "run_jobs": run_jobs,
+    # Turns a recurring template into a real job. Doesn't run anything itself.
+    "run_schedules": run_schedules,
 }

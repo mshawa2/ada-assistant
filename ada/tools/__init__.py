@@ -16,6 +16,7 @@ from ada.tools import (  # noqa: F401  imported for tool-registration side effec
     notices,
     purchasing,
     reminders,
+    schedules_tool,
     search,
     settings_tool,
     shopping,

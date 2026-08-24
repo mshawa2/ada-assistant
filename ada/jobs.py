@@ -302,6 +302,36 @@ def fail(job_id: int, error: str) -> dict:
     )
 
 
+# How long to wait before each retry. Indexed by attempts already made, so a
+# flaky network costs a minute and a provider having a bad afternoon costs
+# half an hour — rather than three attempts inside a single tick, which is not
+# retrying, it's giving up quickly with extra steps.
+BACKOFF_SECONDS = (60, 300, 1800)
+
+
+def backoff_for(attempts: int) -> int:
+    return BACKOFF_SECONDS[min(max(attempts, 1), len(BACKOFF_SECONDS)) - 1]
+
+
+def retry_later(job_id: int, seconds: float, reason: str) -> dict:
+    """The job broke, but not in a way that says stop. Requeue it for later.
+
+    Distinct from `fail`, which is terminal until someone asks for a retry.
+    This is the automatic one, and it keeps the error visible in the meantime
+    so a job stuck in a retry loop looks like what it is rather than like a job
+    that simply hasn't run yet.
+    """
+    return _transition(
+        job_id,
+        PENDING,
+        f"failed ({reason}) — trying again in {int(seconds)}s",
+        error=reason,
+        run_at=time.time() + seconds,
+        started_at=None,
+        owner_pid=None,
+    )
+
+
 def park(job_id: int, approval: dict) -> dict:
     """Hold the job: it wants to do something that needs a human.
 
