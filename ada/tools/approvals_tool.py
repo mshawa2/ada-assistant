@@ -54,7 +54,9 @@ def list_approvals() -> str:
         approval = job.get("pending_approval") or {}
         asked = approval.get("asked_at")
         since = f" (asked {when.stamp(asked)})" if asked else ""
-        lines.append(f"#{job['id']} {job['task']}{since}\n    wants to: {approvals.describe(job)}")
+        # No "wants to:" prefix — the description is already a sentence about
+        # what Ada wants to do, and prefixing it says so twice.
+        lines.append(f"#{job['id']} {job['task']}{since}\n    {approvals.describe(job)}")
     return "\n".join(lines)
 
 
@@ -100,9 +102,10 @@ def resolve_approval(id: int, decision: str) -> str:
     if decision == "approve":
         approvals.approve(id)
         return (
-            f"Approved: {what}. Job #{id} is back on the queue and will do that one "
-            "thing when it next runs — nothing else is authorised by this."
+            f"Approved — {what}\n"
+            f"Job #{id} is back on the queue and will do that one thing when it next "
+            "runs; nothing else is authorised by this."
         )
 
     approvals.deny(id)
-    return f"Refused: {what}. Job #{id} is cancelled and won't run again."
+    return f"Refused — {what}\nJob #{id} is cancelled and won't run again."

@@ -1493,7 +1493,7 @@ The startup greeting **leads with blocked work**, and checks approvals
 independently of the notice log — dismissing a notice must not make a job
 that's still waiting invisible.
 
-## The executor (built, verified against fakes)
+## The executor (built and verified, including against a real model)
 
 `ada/heartbeat/executor.py` is where a job stops being a record and becomes
 work. It's the first thing Ada does with tools while nobody is watching, which
@@ -1559,6 +1559,30 @@ The slice is checked **before** a run, not during one. `MAX_TOOL_ROUNDS`
 already bounds a single turn, so the real risk is a job requeued over and over,
 and a cumulative total is what catches that.
 
+### Verified live
+
+Two real jobs, against the real model, on a throwaway data directory:
+
+- **Read-only, restricted to one tool.** "What is the current weather in
+  Amman?" with `tools=["get_weather"]` — claimed, ran, called the tool, and
+  finished with a real answer. **$0.0078**, recorded against the job's slice.
+- **Wanting a gated tool, with nobody there.** "Put 'Boiler service' on my
+  calendar tomorrow at 10am" with `tools=["create_event"]` — parked at the
+  gate, raised the notice, surfaced in the greeting and in `list_approvals`,
+  and was denied so nothing reached the real calendar. **$0.0074.**
+
+**What the live run found, that the tests didn't.** `create_event` had no
+`confirm_description`, so it fell back to the generic `key=value` dump — fine
+printed at a terminal, and wrong once a description is *quoted* rather than
+printed. The approval queue embeds it in a list, a greeting and two tool
+replies, so "Ada wants to run 'create_event' (title=...)" came out as "wants
+to: Ada wants to run…" and "…automatically.. Job #1 is cancelled". Fixed at the
+root — `create_event` now says "Add 'Boiler service' to your calendar —
+Tuesday 25 August, 10:00–10:30?" — and the surfaces stopped re-wrapping a
+sentence that was already one. `delete_event` still uses the generic wording;
+describing it needs a store lookup inside a confirmation prompt, which is a
+worse trade than an ugly sentence.
+
 ### The known rough edge
 
 **A job re-run after approval starts its turn over.** Whatever it did before
@@ -1623,8 +1647,6 @@ Recorded so they're a decision rather than an oversight:
 - **A job re-run after approval starts its turn over**, repeating whatever it
   did before it parked. Safe because gated actions are the ones that stop and
   ask, but it's why job transcripts are the next thing worth building.
-- **The executor has never run against a real model.** Every path is tested
-  against a faked `stream_turn`; nothing here has made a live API call.
 - **A denied approval cancels the whole job** rather than telling the model no
   and letting it try another way. Deliberate until the executor can resume a
   job mid-turn.

@@ -263,3 +263,49 @@ def test_the_greeting_says_it_once(sent_notifications):
 
 def test_the_greeting_stays_quiet_with_nothing_to_say():
     assert greeting.startup_summary() is None
+
+
+# --- wording that has to compose --------------------------------------------
+#
+# Found by running a real job. The description isn't only printed at a terminal
+# any more — the approval queue quotes it inside a list, a greeting and two
+# tool replies — so a description that's a whole paragraph reads as a stutter
+# everywhere it's embedded.
+
+
+def test_a_calendar_event_says_what_it_is_in_words_a_person_can_answer():
+    from ada.tools.calendar_tool import _describe_new_event
+
+    prompt = _describe_new_event(
+        {"title": "Boiler service", "start_at": "2026-08-25T10:00", "end_at": "2026-08-25T10:30"}
+    )
+
+    assert "Boiler service" in prompt
+    assert "2026-08-25T10:00" not in prompt, "nobody should have to parse ISO to answer"
+    assert "10:00" in prompt and "10:30" in prompt
+
+
+def test_an_all_day_event_does_not_claim_a_time():
+    from ada.tools.calendar_tool import _describe_new_event
+
+    assert "all day" in _describe_new_event(
+        {"title": "Leave", "start_at": "2026-08-25T00:00", "all_day": True}
+    )
+
+
+def test_a_broken_time_lets_the_gate_fall_back_rather_than_swallowing_it():
+    from ada.tools.calendar_tool import _describe_new_event
+
+    with pytest.raises(ValueError):
+        _describe_new_event({"title": "x", "start_at": "tuesday-ish"})
+
+
+def test_the_approval_surfaces_do_not_say_it_twice(sent_notifications):
+    _parked_job(description="Add 'Boiler service' to your calendar — Tuesday, 10:00–10:30?")
+
+    listed = approvals_tool.list_approvals()
+    assert "wants to:" not in listed
+    assert listed.count("Boiler service") == 1
+
+    answered = approvals_tool.resolve_approval(1, "deny")
+    assert ".." not in answered, "a description ending in punctuation must not double it"

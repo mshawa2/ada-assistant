@@ -259,6 +259,33 @@ def _pick_calendar(store, calendar_name: str):
     raise ValueError(f"No calendar called '{calendar_name}'. Writable ones: {available}.")
 
 
+def _describe_new_event(args: dict) -> str:
+    """What the user is actually approving.
+
+    The generic prompt renders `title='Boiler service', start_at='2026-08-25T10:00'`
+    — readable, but it makes the person parse an ISO timestamp to answer a
+    question about their Tuesday morning. It also reads badly everywhere the
+    description is quoted rather than printed: a background job's approval
+    queue shows this sentence in a list, and "Ada wants to run 'create_event'
+    (...)" inside "wants to:" says it twice.
+
+    A bad timestamp raises here, and `agent.py` falls back to the generic
+    wording rather than letting a broken description swallow the gate.
+    """
+    title = args.get("title") or "an event"
+    start = when.to_epoch(args["start_at"])
+
+    if args.get("all_day"):
+        window = f"all day on {when.day(start)}"
+    else:
+        end = when.to_epoch(args["end_at"]) if args.get("end_at") else start + 3600
+        window = f"{when.day(start)}, {when.clock(start)}–{when.clock(end)}"
+
+    where = f" at {args['location']}" if args.get("location") else ""
+    calendar = f", on your {args['calendar_name']} calendar" if args.get("calendar_name") else ""
+    return f"Add '{title}'{where} to your calendar — {window}{calendar}?"
+
+
 @tool(
     name="create_event",
     description=(
@@ -291,6 +318,7 @@ def _pick_calendar(store, calendar_name: str):
         },
         "required": ["title", "start_at"],
     },
+    confirm_description=_describe_new_event,
 )
 def create_event(
     title: str,
