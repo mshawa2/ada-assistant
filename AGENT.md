@@ -1722,6 +1722,54 @@ version was written for the wrong one.
   Two runs, **$0.0059** total — cheaper than the first attempt, because it
   didn't refetch the weather.
 
+## Commands, typed or spoken (built and verified)
+
+Three front ends had grown three different ideas of what a command is. The text
+REPL knew `exit` and `reset`, inline in its loop. The two voice front ends knew
+nothing — so saying "reset" out loud sent the word "reset" to the model, which
+apologised and asked what you'd like to reset. That's the same drift `agent.py`
+exists to prevent one layer up, and `ada/commands.py` is that rule applied to
+the other half of the input: **one command layer, three ways in.**
+
+### What belongs here, and what doesn't
+
+A command is not a cheaper tool. It's for what a model turn **can't** do or
+**shouldn't** be asked to:
+
+- `exit` ends the process. A tool can't — it runs *inside* the turn.
+- `reset` clears the transcript the model is reasoning from. Asking a model to
+  forget the conversation it's part-way through is a strange thing to ask.
+- `status`, `pause`, `resume`, `help` are instant, free and exact. Overlapping
+  tools stay — but "pause" said out loud should stop the heartbeat *now*, not
+  after a round trip that costs money and might come back a paraphrase.
+
+Everything else stays a tool, and a test enforces that no command shadows one:
+a command that could have been a tool is a capability the model can no longer
+reason about or combine.
+
+### Matching is whole-utterance, deliberately
+
+"Let's reset the schedule for Monday" must not wipe the conversation. On an
+open mic the cost of a false positive is far higher than the cost of a miss —
+a miss just goes to the model, which answers it properly. So a command matches
+only when the whole utterance *is* the command, after normalising case,
+punctuation and spacing. Never a substring, never an inferred intent.
+
+Phrasings are **listed rather than guessed at**, because speech arrives through
+transcription: someone says "start over", not "reset", and "Reset." with a full
+stop the transcriber added. A test checks every listed phrase survives its own
+normaliser — one that didn't could never be matched at all.
+
+### Who does what
+
+`Result` carries `quit` and `reset` back to the caller rather than acting on
+them. This module can clear what's on disk; only the front end can clear the
+live message list it hands the model, or leave the loop it's sitting in.
+
+Verified by driving the real text REPL end to end — `help`, `status`, `be
+quiet`, `status`, `carry on`, `reset`, `goodbye` — with no model calls at all,
+which is the point of them.
+
 ## Consolidation notes
 
 The sections above are in **build order**, not importance order — each records

@@ -14,7 +14,7 @@ cancellation her own voice could false-trigger that. Interrupt with Ctrl-C.
 import re
 import threading
 
-from ada import channel, cost, session, settings
+from ada import channel, commands, cost, session, settings
 from ada import interrupt as ada_interrupt
 from ada import status as ada_status
 from ada.audio import listen_for_utterance
@@ -170,6 +170,27 @@ def run() -> None:
                 continue
 
             print(f'you said: "{command}"')
+
+            done = commands.handle(command)
+            if done is not None:
+                print(f"ada> {done.text}\n")
+                try:
+                    speaking.set()
+                    speak(done.text, should_stop=ada_interrupt.requested)
+                except TTSError as e:
+                    print(f"[voice error: {e}]")
+                finally:
+                    speaking.clear()
+                if done.reset:
+                    messages.clear()
+                if done.quit:
+                    break
+                # Back to needing her name: a command isn't a conversation, so
+                # holding the mic open afterwards would be listening to a room
+                # nobody is talking to.
+                open_mic = False
+                continue
+
             ada_status.say("you", command)
             messages.append({"role": "user", "content": command})
             interrupted, reply = run_spoken_turn(messages, interrupt_check=lambda: False, speaking=speaking)

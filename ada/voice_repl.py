@@ -1,6 +1,6 @@
 import threading
 
-from ada import channel, cost, session
+from ada import channel, commands, cost, session
 from ada import interrupt as ada_interrupt
 from ada import status as ada_status
 from ada.audio import enter_pressed, record_until_enter
@@ -71,6 +71,25 @@ def run() -> None:
                 continue
 
             print(f'you said: "{text}"\n')
+
+            done = commands.handle(text)
+            if done is not None:
+                print(f"ada> {done.text}\n")
+                try:
+                    speaking.set()
+                    speak(done.text, should_stop=ada_interrupt.requested)
+                except TTSError as e:
+                    print(f"[voice error: {e}]\n")
+                finally:
+                    speaking.clear()
+                if done.reset:
+                    messages.clear()
+                if done.quit:
+                    stop_event.set()
+                    _print_cost_summary()
+                    return
+                ada_status.set_status("idle")
+                continue
 
             ada_status.say("you", text)
             messages.append({"role": "user", "content": text})

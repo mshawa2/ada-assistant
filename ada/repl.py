@@ -1,6 +1,6 @@
 import threading
 
-from ada import agent, confirm, cost, session
+from ada import agent, commands, confirm, cost, session
 from ada import status as ada_status
 from ada.face import server as face_server
 from ada.heartbeat import loop as heartbeat_loop
@@ -21,7 +21,7 @@ def _print_cost_summary() -> None:
 
 
 def run() -> None:
-    print("Ada is up. Type a message, 'reset' to start a fresh conversation, or 'exit' to quit.\n")
+    print("Ada is up. Type a message, or 'help' for the things I'll do straight away.\n")
 
     stop_event = threading.Event()
     heartbeat_loop.start(stop_event)
@@ -47,16 +47,22 @@ def run() -> None:
 
         if not user_input:
             continue
-        if user_input.lower() in ("exit", "quit"):
-            stop_event.set()
-            print("bye!")
-            _print_cost_summary()
-            return
-        if user_input.lower() == "reset":
-            messages.clear()
-            session.clear()
-            ada_status.clear_transcript()
-            print("[fresh conversation — what I remember about you is untouched]\n")
+
+        # The same layer the voice front ends use — see ada/commands.py. What
+        # it can't do from here is clear the live list or leave this loop, so
+        # it says so and this does it.
+        done = commands.handle(user_input)
+        if done is not None:
+            # Brackets mark a line that isn't conversation — but wrapped round
+            # a six-line list they read as a mistake, so multi-line output
+            # stands on its own.
+            print(f"{done.text}\n" if "\n" in done.text else f"[{done.text}]\n")
+            if done.reset:
+                messages.clear()
+            if done.quit:
+                stop_event.set()
+                _print_cost_summary()
+                return
             continue
 
         start_len = len(messages)
