@@ -51,6 +51,7 @@ CORE = {
     "get_weather",
     "list_notices",
     "list_jobs",
+    "resolve_approval",
 }
 
 # Words that mean a tool without sharing its vocabulary. Deliberately small —
@@ -73,6 +74,7 @@ _HINTS = {
     "weather": ["rain", "sunny", "cold", "hot", "forecast", "temperature"],
     "heartbeat": ["quiet", "proactive", "background"],
     "job": ["background", "queue", "queued", "later", "progress", "underway", "still"],
+    "approval": ["approve", "approval", "blocked", "permission"],
 }
 
 _WORD = re.compile(r"[a-z0-9]+")

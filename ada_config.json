@@ -49,7 +49,8 @@
       "reply_email": "confirm",
       "compose_email": "confirm",
       "run_shortcut": "confirm",
-      "make_purchase": "confirm"
+      "make_purchase": "confirm",
+      "resolve_approval": "confirm"
     },
     "limits": {
       "send_message": {
@@ -89,6 +90,11 @@
         "per_minute": 5,
         "per_hour": 30,
         "per_day": 100
+      },
+      "resolve_approval": {
+        "per_minute": 3,
+        "per_hour": 20,
+        "per_day": 60
       }
     }
   },

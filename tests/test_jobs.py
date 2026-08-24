@@ -171,7 +171,7 @@ def test_a_failed_job_can_be_put_back_on_the_queue():
 # --- the approval seam ------------------------------------------------------
 
 
-def test_a_job_can_park_waiting_for_a_human_and_resume():
+def test_a_job_can_park_waiting_for_a_human():
     jobs.create("email the landlord")
     jobs.claim()
 
@@ -181,9 +181,49 @@ def test_a_job_can_park_waiting_for_a_human_and_resume():
     assert parked["pending_approval"]["tool"] == "compose_email"
     assert parked["owner_pid"] is None, "nobody is working it while it waits"
 
-    resumed = jobs.resume(1)
-    assert resumed["state"] == jobs.RUNNING
-    assert resumed["pending_approval"] is None, "the approval is consumed, not left to replay"
+
+def test_approval_puts_the_job_back_on_the_queue_with_a_grant():
+    """Not straight to running: parking released the worker, so there is no
+    process still sitting in this job waiting to be told to carry on."""
+    jobs.create("email the landlord")
+    jobs.claim()
+    jobs.park(1, {"tool": "compose_email", "input": {"to": "sam"}, "description": "Email Sam"})
+
+    requeued = jobs.resume(1)
+
+    assert requeued["state"] == jobs.PENDING
+    assert requeued["owner_pid"] is None
+    assert requeued["pending_approval"] is None, "the question is answered"
+    assert requeued["granted"]["tool"] == "compose_email", "the answer is kept as a grant"
+    assert jobs.claim()["id"] == 1, "and it is claimable again"
+
+
+def test_a_grant_is_spent_once_and_only_on_the_exact_call():
+    jobs.create("x")
+    jobs.claim()
+    jobs.park(1, {"tool": "send_message", "input": {"to": "sam", "text": "hi"}, "description": "d"})
+    jobs.resume(1)
+
+    assert not jobs.consume_grant(1, "send_message", {"to": "sam", "text": "something else"}), (
+        "approving one message must not authorise a different one"
+    )
+    assert not jobs.consume_grant(1, "compose_email", {"to": "sam", "text": "hi"}), (
+        "nor a different tool with the same arguments"
+    )
+
+    assert jobs.consume_grant(1, "send_message", {"to": "sam", "text": "hi"}) is True
+    assert jobs.consume_grant(1, "send_message", {"to": "sam", "text": "hi"}) is False, "one shot"
+
+
+def test_a_grant_does_not_survive_the_job_ending():
+    jobs.create("x")
+    jobs.claim()
+    jobs.park(1, {"tool": "send_message", "input": {"to": "sam"}, "description": "d"})
+    jobs.resume(1)
+    jobs.claim()
+    jobs.finish(1, "done")
+
+    assert jobs.get(1)["granted"] is None
 
 
 def test_parking_without_an_action_is_rejected():

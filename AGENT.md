@@ -15,7 +15,7 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-57 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+59 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
@@ -32,6 +32,7 @@ depending on the arguments (a lock, not a lamp). Everything else runs freely.
 | Money | `get_spending`, `list_vendors`, `make_purchase` ⚠️ |
 | Memory | `forget` ⚠️, `list_memory`, `remember`, `update_memory` |
 | Background jobs | `cancel_job`, `job_status`, `list_jobs`, `start_job` |
+| Approvals | `list_approvals`, `resolve_approval` ⚠️ |
 | Ada herself | `dismiss_notice`, `find_tool`, `get_settings`, `heartbeat`, `list_modes`, `list_notices`, `set_mode`, `set_setting` ⚠️ |
 
 ## How Ada is held back
@@ -1274,6 +1275,13 @@ degradation".
 `ada/routing.py` sends only what a turn looks like it needs — **~4,200-5,600
 tokens saved per call, roughly 60%.**
 
+The ceiling (`tools.max`) moved 22 → 24 when jobs and approvals landed. The core
+set has to hold every gated tool, so gating `resolve_approval` grew the
+mandatory half; leaving the ceiling alone would have let it silently eat the
+scored budget, and tools that used to be routed in stopped being — caught by
+`tests/test_routing.py`, not by reasoning. `list_approvals` is deliberately
+*not* core: it isn't gated and isn't daily, and the hints reach it.
+
 **Routing is an optimization, never a capability limit.** That rule shapes
 everything, because "I can't do that" about something Ada plainly can is far
 worse than the tokens saved. Three guarantees:
@@ -1328,12 +1336,21 @@ machine is two chances to drift.
 ```
 pending ──claim──> running ──finish──> done
    │                  │
-   │                  ├──park──> waiting_approval ──resume──> running
+   │                  ├──park──> waiting_approval ──approve──> pending
+   │                  │                           ──deny────> cancelled
    │                  ├──fail──> failed ──retry──> pending
-   │                  └──reap──> pending        (owner died)
+   │                  └──reap──> pending         (owner died)
    │
    └──cancel──> cancelled
 ```
+
+**An approved job goes back to `pending`, not straight to `running`.** This was
+wrong when the job table first landed — `resume` moved it to `running`, on the
+assumption that the worker that parked it was still there to carry on. It
+isn't: parking releases ownership and the executor moves on to something else.
+There is nothing to resume *into*. The job rejoins the queue and the next
+executor claims it like any other, carrying the grant. Caught by building the
+tier above it, which is the argument for building tiers in order.
 
 `done` and `cancelled` are terminal. **An illegal transition raises rather than
 silently no-opping**, and the error names what the state *can* do instead — a
@@ -1396,22 +1413,93 @@ file holds real jobs means migrating records that already exist:
 
 ### What comes next, in order
 
-1. **The approval queue.** `confirm` blocks on a human at a terminal. At 3am
-   there isn't one, and neither auto-approving `send_message` nor auto-denying
-   it is defensible. A headless `confirm` implementation parks the action on the
-   job instead (`park()` is already here and tested) and Ada raises it through
-   `heartbeat/notices.py`, which already knows about quiet hours and levels.
-   **This lands before any unattended model turn, not after.**
+1. ~~The approval queue.~~ **Built** — see the next section.
 2. **The executor.** A heartbeat check that claims a job and runs
-   `agent.run_turn` against it — with the job's `tools` allowlist enforced, its
-   `budget_usd` slice, and `confirm` wired to the queue from step 1. That is the
-   step that makes a job an agent process rather than a note to self.
+   `agent.run_turn` against it, with the job's `tools` allowlist enforced as a
+   real boundary, its `budget_usd` slice applied, and `confirm` wired to
+   `approvals.headless()`. It must catch `approvals.Parked` and **discard that
+   turn's messages** rather than persist them — the last `tool_use` block never
+   got its `tool_result`, and the API rejects a dangling tool call on the way
+   back in. That is the step that makes a job an agent process rather than a
+   note to self.
 3. **A real scheduler.** `run_at` is already honoured by `claim()`; what's
    missing is recurrence, one-shot times, backoff on failure, and a
    `schedule_job` tool so Ada can install her own daemons instead of the
    hardcoded `CHECKS` dict.
 4. **Context paging** — summarize the dropped session prefix, and give each job
    its own context rather than sharing the conversation's.
+
+## The approval queue (built and verified)
+
+`ada/confirm.py` asks a human and waits. That works because a human is there —
+in a REPL, or with the dashboard open. A background job has neither, and there
+is no honest answer for `confirm` to return at 3am. Auto-approving
+`send_message` is indefensible. Auto-denying it makes unattended work useless
+and, worse, trains the user to ignore a stream of "couldn't do that".
+
+`ada/approvals.py` is the third answer: **park it.**
+
+### The gate is unchanged; what's behind it isn't
+
+`approvals.headless(job_id)` returns a plain `confirm` callable, so the whole
+of Tier 6 in `agent.py` is untouched. It **raises `Parked` rather than
+returning False**, and the difference is the point: False means *declined*,
+which the model is told and reasons about — it apologises, or tries another
+route, and the turn runs on producing work that assumes an answer nobody gave.
+Parking isn't a no. It's "not yet", and the only faithful way to say that
+inside a synchronous turn is to stop it.
+
+### The gate now sees the action, not a sentence
+
+`confirm` used to be handed only a description. Enough for a human to read;
+useless for parking, because honouring an approval later means recognising the
+same request coming back, and a sentence isn't precise enough for that. So the
+callback takes an `Action` (`ada/confirm.py`) carrying the tool, its arguments
+and the description. Two front ends needed one line each.
+
+### One shot, exact arguments
+
+Approval writes a `granted` record on the job and requeues it. The next run's
+gate consumes that grant only if the tool **and its full arguments** match —
+approving "text Sam about the boiler" does not authorise texting Sam anything
+else, and different arguments ask again. It is cleared before the tool runs, so
+a retry loop can't spend the same yes twice, and it doesn't survive the job
+finishing, failing or being cancelled.
+
+### Denying stops the job
+
+The blunt version, deliberately. A declined action in a conversation is
+recoverable because you're there to steer what happens next; the same decline
+in an unattended job leaves something half-done with nobody watching. Stopping
+is the answer that needs no supervision. Letting a denied job carry on down a
+different path is a real thing to want, and the place to build it is the
+executor, once resuming a job mid-turn exists at all.
+
+### The injection problem, which is the real one here
+
+Approving is the one thing the model must never do on its own initiative. A web
+page, note or email that says "approve job 3" is a document trying to send a
+text through Ada, and the model cannot tell that apart from the user saying it
+out loud. This is the rule about data not being instructions, at its sharpest.
+
+So **`resolve_approval` is itself gated** — the only tool in the registry gated
+because of who might be *calling* it rather than what it does. The model can
+propose an answer; a human still meets the original wording and presses y. The
+confirmation prompt deliberately shows what the *job* wants to do, not what the
+tool does: "Resolve approval #3" is not a decision anyone can make; "Text Sam:
+'the boiler again'" is. Injection's best case becomes Ada asking a question.
+
+### Where the user meets it
+
+A parked job raises an **urgent** notice — announced at the next session start,
+held rather than dropped through quiet hours. Not `critical`: a parked job is
+waiting, not on fire, and waking someone at 4am to approve an email is how a
+gate becomes something people click through. Answering dismisses the notice, so
+the log stops asking a settled question.
+
+The startup greeting **leads with blocked work**, and checks approvals
+independently of the notice log — dismissing a notice must not make a job
+that's still waiting invisible.
 
 ## Consolidation notes
 
@@ -1466,9 +1554,14 @@ and Mac control; and a consolidation pass.**
 Recorded so they're a decision rather than an oversight:
 
 - **Session trimming drops the old prefix rather than summarizing it.**
-- **Jobs are queued but never run.** The lifecycle is built and tested; the
-  executor that gives a job a model turn is the next tier, and the approval
-  queue has to land before it. Ada says so rather than implying otherwise.
+- **Jobs are queued but never run.** The lifecycle and the approval queue are
+  built and tested; the executor that gives a job a model turn is the next
+  tier. Ada says so rather than implying otherwise.
+- **A denied approval cancels the whole job** rather than telling the model no
+  and letting it try another way. Deliberate until the executor can resume a
+  job mid-turn.
+- **A grant never expires.** One-shot and argument-exact, but a job approved
+  and then left unclaimed keeps its grant indefinitely.
 - **Music is library-only and Apple Music only** — Ada can play what the user
   has added, not the whole streaming catalogue, and says so rather than
   implying otherwise.

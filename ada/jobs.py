@@ -16,11 +16,17 @@ state machine is two chances to drift.
 
     pending ──claim──> running ──finish──> done
        │                  │
-       │                  ├──park──> waiting_approval ──resume──> running
+       │                  ├──park──> waiting_approval ──approve──> pending
+       │                  │                           ──deny────> cancelled
        │                  ├──fail──> failed ──retry──> pending
-       │                  └──reap──> pending        (owner died)
+       │                  └──reap──> pending         (owner died)
        │
        └──cancel──> cancelled
+
+An approved job goes back to `pending`, not straight to `running`. Parking
+releases the worker — it has already moved on to something else — so there is
+nobody to resume *into*. The job rejoins the queue and the next executor claims
+it like any other, carrying a one-shot grant for the action that was approved.
 
 `done` and `cancelled` are terminal and nothing moves them. An illegal
 transition raises rather than silently doing nothing: a job that quietly
@@ -57,6 +63,10 @@ file has real jobs in it means migrating records that already exist.
   to answer. `confirm` blocks on a human at a terminal; at 3am there isn't
   one, and neither auto-approving `send_message` nor auto-denying it is a
   defensible answer. The job waits instead.
+- `granted` — the *answer*, once a human gives one: a one-shot authorisation
+  the next run consumes. It is matched on the tool name and the exact
+  arguments, so approving "text Sam about the boiler" does not authorise
+  texting Sam anything else. Different arguments ask again.
 
 Nothing in this module calls a model. That's deliberate — the lifecycle is
 worth having correct and tested before anything unattended runs inside it.
@@ -88,7 +98,9 @@ _ALLOWED: dict[str, set[str]] = {
     # Back to PENDING is the orphan case: the owner died, so the work returns
     # to the queue rather than being lost or left looking alive.
     RUNNING: {DONE, FAILED, WAITING_APPROVAL, CANCELLED, PENDING},
-    WAITING_APPROVAL: {RUNNING, CANCELLED, FAILED},
+    # Approved work rejoins the queue rather than resuming in place: the
+    # worker that parked it released ownership and moved on.
+    WAITING_APPROVAL: {PENDING, CANCELLED, FAILED},
     DONE: set(),
     FAILED: {PENDING},
     CANCELLED: set(),
@@ -171,6 +183,7 @@ def create(
             "tools": tools,
             "budget_usd": budget_usd,
             "pending_approval": None,
+            "granted": None,
             "log": [],
         }
         _note(job, PENDING, "created")
@@ -267,6 +280,7 @@ def finish(job_id: int, result: str) -> dict:
         finished_at=time.time(),
         owner_pid=None,
         pending_approval=None,
+        granted=None,
     )
 
 
@@ -280,6 +294,7 @@ def fail(job_id: int, error: str) -> dict:
         finished_at=time.time(),
         owner_pid=None,
         pending_approval=None,
+        granted=None,
     )
 
 
@@ -303,14 +318,51 @@ def park(job_id: int, approval: dict) -> dict:
 
 
 def resume(job_id: int) -> dict:
-    """The human answered. Back to running, with the approval consumed."""
-    return _transition(
-        job_id,
-        RUNNING,
-        "approved, resuming",
-        pending_approval=None,
-        owner_pid=os.getpid(),
-    )
+    """A human approved the parked action. Back on the queue, grant in hand.
+
+    Not straight to `running`: parking released the worker, so there is no
+    process still sitting in this job waiting to be told to carry on. It
+    rejoins the queue and whichever executor claims it next finds `granted`
+    waiting — the one action a human has already said yes to.
+    """
+    with _lock:
+        job = require(job_id)
+        return _transition(
+            job_id,
+            PENDING,
+            "approved — requeued with a one-shot grant",
+            granted=job.get("pending_approval"),
+            pending_approval=None,
+            started_at=None,
+            owner_pid=None,
+        )
+
+
+def consume_grant(job_id: int, tool: str, tool_input: dict) -> bool:
+    """Spend the one-shot approval, if it matches this exact call.
+
+    Matched on the tool *and* its full arguments, not the tool alone. A grant
+    for "text Sam about the boiler" must not authorise texting Sam anything
+    else, and a model that comes back with different arguments after a human
+    said yes is precisely the case where asking again is right.
+
+    One shot: a matched grant is cleared before the tool runs, so a retry loop
+    can't spend the same approval twice.
+    """
+    with _lock:
+        jobs = _load()
+        job = next((j for j in jobs if j["id"] == job_id), None)
+        if job is None:
+            return False
+
+        grant = job.get("granted")
+        if not grant or grant.get("tool") != tool or grant.get("input") != tool_input:
+            return False
+
+        job["granted"] = None
+        _note(job, job["state"], f"used the approval for {tool}")
+        _save(jobs)
+        return True
 
 
 def cancel(job_id: int, reason: str = "cancelled by the user") -> dict:
@@ -322,6 +374,7 @@ def cancel(job_id: int, reason: str = "cancelled by the user") -> dict:
         finished_at=time.time(),
         owner_pid=None,
         pending_approval=None,
+        granted=None,
     )
 
 

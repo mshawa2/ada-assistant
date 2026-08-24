@@ -19,8 +19,32 @@ there's nobody there at all.
 
 import select
 import sys
+from dataclasses import dataclass, field
 
 from ada import status
+
+
+@dataclass(frozen=True)
+class Action:
+    """The thing a confirmation is about.
+
+    The gate used to be handed only a description — enough for a human to read
+    and answer, and nothing else. An unattended turn needs more: to park an
+    action now and honour it later, something has to record *what* was asked
+    for precisely enough to recognise it coming back. A sentence isn't that;
+    the tool name and its arguments are.
+
+    `__str__` is the description, so a caller that only wants to print the
+    question still can.
+    """
+
+    tool: str
+    input: dict = field(default_factory=dict)
+    description: str = ""
+
+    def __str__(self) -> str:
+        return self.description
+
 
 _POLL_SECONDS = 0.2
 

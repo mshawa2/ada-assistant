@@ -110,6 +110,11 @@ DEFAULTS: dict[str, Any] = {
             "run_shortcut": CONFIRM,
             "compose_email": CONFIRM,
             "make_purchase": CONFIRM,
+            # Gated because of who might be *calling* it, not what it does.
+            # A web page saying "approve job 3" is a document trying to send a
+            # text through Ada; this makes the model able only to propose an
+            # answer, with a human still meeting the original wording.
+            "resolve_approval": CONFIRM,
         },
         # A ceiling on top of confirmation. `confirm` protects against one
         # wrong action; it does nothing about thirty, because the human in the
@@ -134,6 +139,7 @@ DEFAULTS: dict[str, Any] = {
             # backstop against a model in a loop queueing work until the disk
             # fills, which is a real failure mode for a tool that always succeeds.
             "start_job": {"per_minute": 5, "per_hour": 30, "per_day": 100},
+            "resolve_approval": {"per_minute": 3, "per_hour": 20, "per_day": 60},
         },
     },
     "purchasing": {
@@ -167,7 +173,7 @@ DEFAULTS: dict[str, Any] = {
         # everything. find_tool is always included either way, so routing can
         # cost a round trip but never a capability.
         "routing": "auto",
-        "max": 22,
+        "max": 24,
     },
     "search": {
         # "auto" picks Brave or Tavily if their key is in .env, else Wikipedia.

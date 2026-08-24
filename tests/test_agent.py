@@ -94,8 +94,13 @@ def test_confirmation_prompt_names_the_tool_and_its_arguments(monkeypatch, captu
 
     _run([{"role": "user", "content": "x"}], captured, confirm=lambda d: asked.append(d) or False)
 
-    assert "add_reminder" in asked[0]
-    assert "buy milk" in asked[0]
+    assert "add_reminder" in asked[0].description
+    assert "buy milk" in asked[0].description
+    # The gate is handed the action itself, not just a sentence about it —
+    # an unattended gate has to record what was asked for precisely enough to
+    # recognise the same request coming back after a human approves it.
+    assert asked[0].tool == "add_reminder"
+    assert asked[0].input == {"text": "buy milk"}
 
 
 def test_tool_error_comes_back_as_an_error_result_not_a_crash(monkeypatch, captured):

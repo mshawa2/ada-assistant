@@ -8,10 +8,10 @@ from ada.heartbeat.greeting import startup_summary
 from ada.llm import LLMError
 
 
-def _confirm(message: str) -> bool:
+def _confirm(action: confirm.Action) -> bool:
     # Answerable from the terminal or the browser, whichever comes first.
     # See ada/confirm.py — it still fails safe with nobody there.
-    return confirm.ask(message)
+    return confirm.ask(action.description)
 
 
 def _print_cost_summary() -> None:

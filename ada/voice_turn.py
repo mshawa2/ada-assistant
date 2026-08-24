@@ -58,7 +58,7 @@ def _complete_sentences(buffer: str) -> tuple[list[str], str]:
     return sentences, buffer[start:]
 
 
-def confirm(message: str) -> bool:
+def confirm(action) -> bool:
     """Spoken heads-up, but the answer is typed or clicked — never spoken.
 
     A misheard "yes" is not a risk worth taking on a safety gate; that was a
@@ -68,7 +68,7 @@ def confirm(message: str) -> bool:
     def announce(text: str) -> None:
         speak(f"{text} Confirm in the terminal or the browser.", should_stop=ada_interrupt.requested)
 
-    return confirm_module.ask(message, speak=announce)
+    return confirm_module.ask(action.description, speak=announce)
 
 
 def run_spoken_turn(

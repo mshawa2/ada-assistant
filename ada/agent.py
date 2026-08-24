@@ -5,6 +5,7 @@ lives, so voice and text can never drift apart."""
 from collections.abc import Callable
 
 from ada import audit, limits, routing, safety, status
+from ada.confirm import Action
 from ada.llm import stream_turn
 from ada.tools import call as call_tool, specs as tool_specs
 from ada.tools.registry import get as get_tool
@@ -16,7 +17,7 @@ def run_turn(
     messages: list[dict],
     on_text: Callable[[str], None],
     on_status: Callable[[str], None],
-    confirm: Callable[[str], bool],
+    confirm: Callable[[Action], bool],
 ) -> None:
     """Runs one full turn, including any tool calls, appending assistant/tool
     messages to `messages` in place.
@@ -25,9 +26,15 @@ def run_turn(
     order, as it streams in — this is what a caller should print and/or
     speak. `on_status` is called with human-readable status lines (which
     tool is running) that are for the console only, never spoken aloud.
-    `confirm` is called, with a plain-language description of the action,
-    only for tools flagged in safety_config.json — it must return True before
-    the tool actually runs.
+    `confirm` is called with an `Action` — the tool, its arguments and a
+    plain-language description — only for tools flagged in safety_config.json.
+    It must return True before the tool actually runs.
+
+    It may also *raise*, and that is a real part of the contract rather than an
+    accident: an unattended turn has no human to answer, so its gate parks the
+    action and stops the turn instead of guessing. A raise here leaves the last
+    `tool_use` block unanswered, so the caller must discard this turn's
+    messages rather than persist them — the API rejects a dangling tool call.
     """
     final_message = _stream(messages, on_text, on_status)
 
@@ -115,7 +122,7 @@ def _describe_action(name: str, tool_input: dict) -> str:
 def _execute_tool_calls(
     final_message,
     on_status: Callable[[str], None],
-    confirm: Callable[[str], bool],
+    confirm: Callable[[Action], bool],
 ) -> list[dict]:
     results = []
     for block in final_message.content:
@@ -154,10 +161,14 @@ def _execute_tool_calls(
             continue
 
         if safety.requires_confirmation(block.name) or _tool_asks_to_confirm(block.name, block.input):
-            description = _describe_action(block.name, block.input)
-            status.set_pending_confirmation(description)
+            action = Action(
+                tool=block.name,
+                input=block.input,
+                description=_describe_action(block.name, block.input),
+            )
+            status.set_pending_confirmation(action.description)
             try:
-                approved = confirm(description)
+                approved = confirm(action)
             finally:
                 status.set_pending_confirmation(None)
             audit.log("confirmation_requested", tool=block.name, input=block.input, approved=approved)
