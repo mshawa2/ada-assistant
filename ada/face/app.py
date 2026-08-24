@@ -10,13 +10,25 @@ bound to 127.0.0.1 — but it's the reason `/api/confirm` takes the
 confirmation's id. A stale tab clicking "approve" after the question changed
 would otherwise approve the *new* question, which is exactly the sort of thing
 a gate exists to prevent.
+
+**Two kinds of state, and it matters which is which.** `status.py` is process
+memory: the live conversation, what's armed, a confirmation being waited on
+right now. Everything else — jobs, approvals, schedules, notices, spend — is on
+disk under `data/`. That split is what decides which panels still work when the
+face is served by the always-on daemon rather than by a REPL: the durable half
+does, the live half doesn't, and `/api/conversation` exists so the chat panel
+falls back to the persisted transcript instead of looking dead.
+
+`/api/approvals/<id>/<decision>` is the one that earns the dashboard its keep.
+With the daemon running and no terminal open, a job that parks for approval had
+no way to be answered at all — you had to start a REPL to unblock it.
 """
 
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from ada import audit, budget, cost, session, status
+from ada import approvals, audit, budget, cost, jobs, recap, schedules, session, status
 from ada.heartbeat.kill_switch import is_paused, set_paused
 from ada.heartbeat.notices import dismiss_notice, list_notices
 from ada.tools import specs as tool_specs
@@ -52,6 +64,120 @@ def api_confirm():
 
     answered = status.answer_pending(confirmation_id, bool(payload.get("approved")))
     return jsonify({"ok": answered, "reason": "" if answered else "already answered or expired"})
+
+
+@app.route("/api/conversation")
+def api_conversation():
+    """The chat panel's contents, on the slow clock.
+
+    Live if there is one. Otherwise the persisted transcript, because the face
+    served by the daemon has no conversation of its own and an empty panel
+    reads as "broken" rather than "nobody is talking to her right now".
+
+    Deliberately not part of `/api/status`, which is polled several times a
+    second to animate the core — this reads a file, and reading `session.json`
+    off disk ten times a second is exactly what `/api/vitals` was split out to
+    avoid.
+    """
+    live = status.snapshot()["transcript"]
+    if live:
+        return jsonify({"turns": live, "live": True})
+
+    turns = []
+    for message in session.load():
+        content = message.get("content")
+        role = "you" if message.get("role") == "user" else "ada"
+        if isinstance(content, str):
+            # The recap Ada writes to herself is bookkeeping, not conversation.
+            if not content.startswith(recap.MARKER):
+                turns.append({"role": role, "text": content, "streaming": False})
+        elif isinstance(content, list):
+            text = "".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+            if text.strip():
+                turns.append({"role": role, "text": text, "streaming": False})
+    return jsonify({"turns": turns[-12:], "live": False})
+
+
+@app.route("/api/jobs")
+def api_jobs():
+    """Open work first, then what recently finished."""
+    everything = jobs.load_jobs()
+    open_jobs = [j for j in everything if j["state"] in jobs.OPEN]
+    closed = [j for j in everything if j["state"] not in jobs.OPEN][-6:]
+
+    def row(job):
+        return {
+            "id": job["id"],
+            "task": job["task"],
+            "state": job["state"],
+            "line": jobs.describe(job),
+            "spent": job.get("spent_usd", 0.0),
+            "budget": job.get("budget_usd"),
+            "tools": job.get("tools"),
+            "attempts": job.get("attempts", 0),
+        }
+
+    return jsonify({"open": [row(j) for j in open_jobs], "closed": [row(j) for j in reversed(closed)]})
+
+
+@app.route("/api/approvals")
+def api_approvals():
+    return jsonify(
+        [
+            {
+                "id": job["id"],
+                "task": job["task"],
+                "wants": approvals.describe(job),
+                "tool": (job.get("pending_approval") or {}).get("tool"),
+                "asked_at": (job.get("pending_approval") or {}).get("asked_at"),
+            }
+            for job in approvals.pending()
+        ]
+    )
+
+
+@app.route("/api/approvals/<int:job_id>/<decision>", methods=["POST"])
+def api_resolve_approval(job_id: int, decision: str):
+    """Answer a parked job from the browser.
+
+    The same decision the gated `resolve_approval` tool asks a human to make,
+    reached the other way round. There's no second confirmation here and there
+    shouldn't be: the tool is gated because a *model* might be calling it, and
+    a click on a loopback-only page is a person deciding, which is the thing
+    the gate was trying to get to in the first place.
+    """
+    if decision not in ("approve", "deny"):
+        return jsonify({"ok": False, "reason": "decision must be approve or deny"}), 400
+
+    try:
+        (approvals.approve if decision == "approve" else approvals.deny)(job_id)
+    except ValueError as e:
+        return jsonify({"ok": False, "reason": str(e)}), 409
+    return jsonify({"ok": True})
+
+
+@app.route("/api/schedules")
+def api_schedules():
+    return jsonify(
+        [
+            {
+                "id": s["id"],
+                "task": s["task"],
+                "rhythm": schedules.describe(s["spec"]),
+                "enabled": s.get("enabled", True),
+                "next_due_at": s.get("next_due_at"),
+                "runs": s.get("runs", 0),
+            }
+            for s in sorted(
+                schedules.load_schedules(),
+                key=lambda s: (not s.get("enabled", True), s.get("next_due_at", 0)),
+            )
+        ]
+    )
 
 
 @app.route("/api/notices")

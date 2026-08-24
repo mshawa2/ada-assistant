@@ -114,10 +114,13 @@
   }
   .rail { display: grid; gap: var(--gap); min-height: 0; }
   .rail.left  { grid-area: left;  grid-template-rows: auto auto minmax(0, 1fr); }
-  .rail.right { grid-area: right; grid-template-rows: auto minmax(0, 1fr); }
+  /* One row per panel, and the count is load-bearing: a panel past the end
+     of this template gets an implicit row, the rail overflows its fixed
+     height, and it spills over the column beside it. Adding a panel here
+     means adding a row. */
+  .rail.right { grid-area: right; grid-template-rows: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .8fr); }
   .middle {
-    grid-area: core; display: grid; gap: var(--gap); min-height: 0;
-    grid-template-rows: minmax(0, 1fr) minmax(0, 42%);
+    grid-area: core; display: flex; flex-direction: column; gap: var(--gap); min-height: 0;
   }
 
   /* --- the panels ---------------------------------------------------------
@@ -362,6 +365,42 @@
   #activity .n { overflow: hidden; text-overflow: ellipsis; }
   .muted { color: var(--dim); font-size: 12px; margin: 0; }
 
+  /* Work: jobs, approvals, schedules. One row shape, three uses. */
+  .row { display: flex; gap: 9px; align-items: flex-start; padding: 7px 0; border-top: 1px solid rgba(255,255,255,.06); }
+  .row:first-child { border-top: 0; padding-top: 0; }
+  .row .body { flex: 1; min-width: 0; }
+  .row .title { font-size: 13px; line-height: 1.35; }
+  .row .sub { font: 10px/1.5 var(--mono); letter-spacing: .08em; color: var(--dim); margin-top: 3px; text-transform: uppercase; }
+  .row .acts { display: flex; gap: 5px; flex-shrink: 0; }
+
+  /* A state badge that reads at a glance. Blocked work is the one thing on
+     this page that needs a person, so it is the one that gets a colour. */
+  .badge {
+    font: 9px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase;
+    padding: 4px 6px; border: 1px solid rgba(255,255,255,.16); border-radius: 3px;
+    color: var(--dim); white-space: nowrap; margin-top: 1px;
+  }
+  .badge.running { color: var(--accent); border-color: rgba(96,209,255,.5); }
+  .badge.waiting_approval { color: var(--stop); border-color: rgba(248,113,113,.55); background: rgba(248,113,113,.1); }
+  .badge.done { color: var(--go); border-color: rgba(74,222,128,.4); }
+  .badge.failed { color: var(--stop); border-color: rgba(248,113,113,.4); }
+  .badge.paused { opacity: .55; }
+
+  /* The blocked-work panel announces itself — it is the only panel on the
+     page that means "nothing moves until you look at this". */
+  /* Flex rather than a grid row, because this one appears and disappears —
+     a template row sized for a panel that isn't there is a gap, and a panel
+     past the end of the template overflows the column. */
+  .middle > .core-panel { flex: 1 1 auto; min-height: 200px; }
+  .middle > #blocked-panel { flex: 0 0 auto; max-height: 42%; }
+  .middle > #conversation-panel { flex: 0 1 38%; min-height: 120px; }
+
+  #blocked-panel { border-color: rgba(248,113,113,.45); }
+  #blocked-panel .p-head h2 { color: var(--stop); }
+  #blocked .title { font-size: 13.5px; }
+  #blocked .wants { margin-top: 5px; padding: 7px 9px; border-left: 2px solid rgba(248,113,113,.5);
+                    background: rgba(248,113,113,.07); font-size: 12.5px; line-height: 1.45; }
+
   /* --- boot ---------------------------------------------------------------- */
   .boot {
     position: fixed; inset: 0; z-index: 9; background: var(--bg); display: grid; place-items: center;
@@ -381,7 +420,10 @@
       grid-template-columns: 1fr; grid-template-rows: auto;
       grid-template-areas: "top" "core" "left" "right" "foot";
     }
-    .middle { grid-template-rows: auto auto; }
+    .middle > .core-panel,
+    .middle > #blocked-panel,
+    .middle > #conversation-panel { flex: none; max-height: none; }
+    .rail.left, .rail.right { grid-template-rows: none; grid-auto-rows: auto; }
     .core-panel { min-height: 400px; }
     .p-body { max-height: 340px; }
   }
@@ -490,13 +532,28 @@
       </section>
     </section>
 
-    <section class="panel" style="--d:.09s">
+    <section class="panel" id="blocked-panel" style="--d:.06s; display:none">
+      <div class="p-head"><h2>Waiting on you</h2><div class="hatch"></div><span class="meta" id="v-blocked">0</span></div>
+      <div class="p-body" id="blocked"></div>
+    </section>
+
+    <section class="panel" id="conversation-panel" style="--d:.09s">
       <div class="p-head"><h2>Conversation</h2><div class="hatch"></div><span class="meta" id="v-turns">0 turns</span></div>
       <div class="p-body"><div id="chat"><div class="empty">Say &ldquo;Ada&rdquo; to start, or type in the terminal.</div></div></div>
     </section>
   </div>
 
   <div class="rail right">
+    <section class="panel" style="--d:.17s">
+      <div class="p-head"><h2>Jobs</h2><div class="hatch"></div><span class="meta" id="v-jobs">0</span></div>
+      <div class="p-body" id="jobs"><p class="muted">Nothing queued.</p></div>
+    </section>
+
+    <section class="panel" style="--d:.21s">
+      <div class="p-head"><h2>Scheduled</h2><div class="hatch"></div><span class="meta" id="v-schedules">0</span></div>
+      <div class="p-body" id="schedules"><p class="muted">Nothing recurring.</p></div>
+    </section>
+
     <section class="panel" style="--d:.16s">
       <div class="p-head"><h2>Noticed</h2><div class="hatch"></div><span class="meta" id="v-notices">0</span></div>
       <div class="p-body" id="notices"><p class="muted">Nothing to report.</p></div>
@@ -522,6 +579,17 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => (
   {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 let pendingId = null;
+// Re-rendering a panel that hasn't changed throws away its DOM every four
+// seconds. For a list of text that's merely wasteful; for the approve/refuse
+// buttons it means a click can land on an element that no longer exists.
+// Same guard the chat and armed panels already use.
+const lastRender = {};
+function changed(key, data) {
+  const next = JSON.stringify(data);
+  if (lastRender[key] === next) return false;
+  lastRender[key] = next;
+  return true;
+}
 let lastChat = "";
 let lastArmed = "";
 let runningTool = null;
@@ -555,15 +623,21 @@ function renderState(snap) {
     : (detail && !echoes ? detail : (state === "idle" ? "standing by" : ""));
 }
 
-function renderChat(turns) {
+// Whether this page is attached to a process that's actually talking. The
+// face served by the always-on daemon isn't — status.py is process memory —
+// so the chat panel falls back to what's on disk rather than looking dead.
+let hasLiveChat = false;
+
+function renderChat(turns, live = true) {
   // Cheap identity check: re-rendering every poll would fight text selection
   // and reset scroll while you're reading.
-  const key = JSON.stringify(turns);
+  const key = JSON.stringify([turns, live]);
   if (key === lastChat) return;
   lastChat = key;
 
   const chat = $("chat");
-  $("v-turns").textContent = `${turns.length} turn${turns.length === 1 ? "" : "s"}`;
+  $("v-turns").textContent =
+    `${turns.length} turn${turns.length === 1 ? "" : "s"}${live || !turns.length ? "" : " \u00b7 from disk"}`;
   if (!turns.length) {
     chat.innerHTML = '<div class="empty">Say &ldquo;Ada&rdquo; to start, or type in the terminal.</div>';
     return;
@@ -616,7 +690,8 @@ async function refreshStatus() {
     return;
   }
   renderState(snap);
-  renderChat(snap.transcript || []);
+  hasLiveChat = (snap.transcript || []).length > 0;
+  if (hasLiveChat) renderChat(snap.transcript, true);
   renderConfirm(snap.pending);
 }
 
@@ -685,21 +760,110 @@ async function refreshVitals() {
   renderArmed(v.armed || []);
 }
 
+function when(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const today = new Date().toDateString() === d.toDateString();
+  return today ? d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})
+               : d.toLocaleDateString([], {weekday: "short", day: "numeric", month: "short"})
+                 + " " + d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+}
+
+// Blocked work is the only thing here that stops until a person looks at it,
+// so the panel hides entirely when there is none rather than sitting empty.
+async function refreshBlocked() {
+  const list = await get("/api/approvals");
+  if (!list) return;
+  $("blocked-panel").style.display = list.length ? "" : "none";
+  $("v-blocked").textContent = list.length;
+  if (!changed("blocked", list)) return;
+  $("blocked").innerHTML = list.map(a => `
+    <div class="row">
+      <div class="body">
+        <div class="title">Job #${a.id} &mdash; ${esc(a.task)}</div>
+        <div class="wants">${esc(a.wants)}</div>
+        <div class="sub">asked ${esc(when(a.asked_at))}</div>
+      </div>
+      <div class="acts">
+        <button class="tiny go" onclick="resolve(${a.id}, 'approve')">Approve</button>
+        <button class="tiny stop" onclick="resolve(${a.id}, 'deny')">Refuse</button>
+      </div>
+    </div>`).join("");
+}
+async function resolve(id, decision) {
+  await fetch(`/api/approvals/${id}/${decision}`, {method: "POST"});
+  delete lastRender.blocked; delete lastRender.jobs; delete lastRender.notices;
+  refreshBlocked(); refreshJobs(); refreshNotices();
+}
+
+async function refreshJobs() {
+  const data = await get("/api/jobs");
+  if (!data) return;
+  const rows = [...data.open, ...data.closed];
+  $("v-jobs").textContent = data.open.length;
+  if (!changed("jobs", rows)) return;
+  $("jobs").innerHTML = rows.length
+    ? rows.map(j => {
+        const bits = [];
+        if (j.spent) bits.push(`$${j.spent.toFixed(4)}${j.budget ? ` / $${j.budget}` : ""}`);
+        if (j.tools) bits.push(`${j.tools.length} tool${j.tools.length === 1 ? "" : "s"}`);
+        if (j.attempts > 1) bits.push(`attempt ${j.attempts}`);
+        return `
+        <div class="row">
+          <span class="badge ${esc(j.state)}">${esc(j.state.replace("_", " "))}</span>
+          <div class="body">
+            <div class="title">${esc(j.task)}</div>
+            ${bits.length ? `<div class="sub">${esc(bits.join("  \u00b7  "))}</div>` : ""}
+          </div>
+        </div>`;
+      }).join("")
+    : '<p class="muted">Nothing queued.</p>';
+}
+
+async function refreshSchedules() {
+  const list = await get("/api/schedules");
+  if (!list) return;
+  $("v-schedules").textContent = list.filter(s => s.enabled).length;
+  if (!changed("schedules", list)) return;
+  $("schedules").innerHTML = list.length
+    ? list.map(s => `
+        <div class="row">
+          <span class="badge ${s.enabled ? "" : "paused"}">${s.enabled ? "on" : "paused"}</span>
+          <div class="body">
+            <div class="title">${esc(s.task)}</div>
+            <div class="sub">${esc(s.rhythm)}${s.enabled && s.next_due_at ? "  \u00b7  next " + esc(when(s.next_due_at)) : ""}${s.runs ? "  \u00b7  run " + s.runs + "x" : ""}</div>
+          </div>
+        </div>`).join("")
+    : '<p class="muted">Nothing recurring.</p>';
+}
+
+// On the slow clock, and only when nothing live is running: this reads
+// session.json off disk, which is exactly what /api/vitals was split out to
+// keep off the 400ms poll.
+async function refreshConversation() {
+  if (hasLiveChat) return;
+  const data = await get("/api/conversation");
+  if (!data) return;
+  renderChat(data.turns, data.live);
+}
+
 async function refreshNotices() {
   const list = await get("/api/notices");
   if (!list) return;
   $("v-notices").textContent = list.length;
+  if (!changed("notices", list)) return;
   $("notices").innerHTML = list.length
     ? list.map(n => `
         <div class="notice">
           <span class="dot ${esc(n.level)}"></span>
           <span class="txt">${esc(n.text)}</span>
-          <button class="tiny" onclick="dismiss(${n.id})">clear</button>
+          ${n.check === "approvals" ? "" : `<button class="tiny" onclick="dismiss(${n.id})">clear</button>`}
         </div>`).join("")
     : '<p class="muted">Nothing to report.</p>';
 }
 async function dismiss(id) {
   await fetch(`/api/notices/${id}/dismiss`, {method: "POST"});
+  delete lastRender.notices;
   refreshNotices();
 }
 
@@ -731,8 +895,11 @@ function tick() { $("top-clock").textContent = new Date().toLocaleTimeString(); 
 refreshStatus(); setInterval(refreshStatus, 400);
 tick(); setInterval(tick, 1000);
 refreshVitals(); setInterval(refreshVitals, 2500);
-refreshNotices(); refreshHeartbeat(); refreshActivity();
-setInterval(() => { refreshNotices(); refreshHeartbeat(); refreshActivity(); }, 4000);
+function slow() {
+  refreshNotices(); refreshHeartbeat(); refreshActivity();
+  refreshBlocked(); refreshJobs(); refreshSchedules(); refreshConversation();
+}
+slow(); setInterval(slow, 4000);
 </script>
 </body>
 </html>

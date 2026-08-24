@@ -294,3 +294,171 @@ def test_status_stays_the_shape_the_face_animates_against(client):
     body = client.get("/api/status").get_json()
 
     assert set(body) == {"status", "state", "tool", "transcript", "pending"}
+
+
+# --- the OS half of the dashboard -------------------------------------------
+#
+# The face was built when Ada was an assistant. Jobs, approvals and schedules
+# arrived after it, and until these endpoints existed none of it was on the
+# page — the only trace of a blocked job was a *notice*, whose "clear" button
+# dismissed the notice and left the job blocked forever.
+
+
+@pytest.fixture
+def client():
+    return app.test_client()
+
+
+def test_jobs_are_split_into_what_is_open_and_what_just_finished(client):
+    from ada import jobs
+
+    jobs.create("still going")
+    jobs.create("finished")
+    jobs.claim()
+    jobs.claim()
+    jobs.finish(2, "all done")
+
+    body = client.get("/api/jobs").get_json()
+
+    assert [j["task"] for j in body["open"]] == ["still going"]
+    assert [j["task"] for j in body["closed"]] == ["finished"]
+    assert body["open"][0]["state"] == "running"
+
+
+def test_a_job_carries_the_numbers_the_panel_shows(client):
+    from ada import jobs
+
+    jobs.create("costly", tools=["web_search"], budget_usd=0.5)
+    jobs.claim()
+    jobs.record_spend(1, 0.031)
+
+    row = client.get("/api/jobs").get_json()["open"][0]
+
+    assert row["spent"] == pytest.approx(0.031)
+    assert row["budget"] == 0.5
+    assert row["tools"] == ["web_search"]
+
+
+def test_a_blocked_job_is_reachable_from_the_browser(client, sent_notifications):
+    """With the daemon running and no terminal open, a parked job had no way to
+    be answered at all — you had to start a REPL to unblock it."""
+    from ada import approvals, jobs
+    from ada.confirm import Action
+
+    jobs.create("email the landlord")
+    jobs.claim()
+    approvals.park(1, Action(tool="compose_email", input={"to": "sam"}, description="Email Sam"))
+
+    listed = client.get("/api/approvals").get_json()
+    assert [a["wants"] for a in listed] == ["Email Sam"]
+
+    assert client.post("/api/approvals/1/approve").get_json()["ok"] is True
+    assert jobs.get(1)["state"] == jobs.PENDING
+    assert jobs.get(1)["granted"]["tool"] == "compose_email"
+    assert client.get("/api/approvals").get_json() == []
+
+
+def test_refusing_from_the_browser_stops_the_job(client, sent_notifications):
+    from ada import approvals, jobs
+    from ada.confirm import Action
+
+    jobs.create("email the landlord")
+    jobs.claim()
+    approvals.park(1, Action(tool="compose_email", input={}, description="Email Sam"))
+
+    assert client.post("/api/approvals/1/deny").get_json()["ok"] is True
+    assert jobs.get(1)["state"] == jobs.CANCELLED
+
+
+def test_answering_a_job_that_is_not_waiting_is_refused_not_crashed(client):
+    from ada import jobs
+
+    jobs.create("not blocked")
+
+    response = client.post("/api/approvals/1/approve")
+    assert response.status_code == 409
+    assert "isn't waiting" in response.get_json()["reason"]
+
+
+def test_only_approve_and_deny_are_decisions(client):
+    assert client.post("/api/approvals/1/maybe").status_code == 400
+
+
+def test_schedules_come_back_soonest_first_with_paused_ones_last(client):
+    from ada import schedules
+
+    schedules.create("weekly review", {"repeat": "weekly", "on": "sunday", "at": "18:00"})
+    schedules.create("morning briefing", {"repeat": "daily", "at": "08:00"})
+    schedules.create("hourly sweep", {"repeat": "hourly"})
+    schedules.set_enabled(3, False)
+
+    listed = client.get("/api/schedules").get_json()
+
+    assert [s["task"] for s in listed][-1] == "hourly sweep", "paused ones sink"
+    assert listed[0]["next_due_at"] <= listed[1]["next_due_at"]
+    assert listed[0]["rhythm"]
+
+
+# --- the conversation, when nothing is live ---------------------------------
+
+
+def test_a_live_conversation_is_used_when_there_is_one(client):
+    status.say("you", "hello")
+
+    body = client.get("/api/conversation").get_json()
+
+    assert body["live"] is True
+    assert body["turns"][0]["text"] == "hello"
+
+
+def test_the_persisted_transcript_stands_in_when_nothing_is_live(client):
+    """The face served by the daemon has no conversation of its own, and an
+    empty panel reads as "broken" rather than "nobody is talking to her"."""
+    from ada import session
+
+    session.record(
+        [
+            {"role": "user", "content": "what's the weather"},
+            {"role": "assistant", "content": [{"type": "text", "text": "Clear and 24C."}]},
+        ]
+    )
+
+    body = client.get("/api/conversation").get_json()
+
+    assert body["live"] is False
+    assert [t["text"] for t in body["turns"]] == ["what's the weather", "Clear and 24C."]
+    assert [t["role"] for t in body["turns"]] == ["you", "ada"]
+
+
+def test_the_recap_ada_writes_to_herself_is_not_conversation(client):
+    from ada import recap, session
+
+    session.record(
+        [
+            {"role": "user", "content": f"{recap.MARKER}\nThey prefer aisle seats."},
+            {"role": "assistant", "content": "Got it."},
+            {"role": "user", "content": "book the train"},
+        ]
+    )
+
+    turns = client.get("/api/conversation").get_json()["turns"]
+
+    assert not any(recap.MARKER in t["text"] for t in turns)
+    assert turns[-1]["text"] == "book the train"
+
+
+def test_tool_traffic_is_not_shown_as_something_someone_said(client):
+    from ada import session
+
+    session.record(
+        [
+            {"role": "user", "content": "check it"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "get_weather", "input": {}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "24C"}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "It's 24C."}]},
+        ]
+    )
+
+    turns = client.get("/api/conversation").get_json()["turns"]
+
+    assert [t["text"] for t in turns] == ["check it", "It's 24C."]

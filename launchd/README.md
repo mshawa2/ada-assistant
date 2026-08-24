@@ -1,9 +1,22 @@
-# Running Ada's heartbeat always-on (macOS)
+# Running Ada always-on (macOS)
 
 Without this, the heartbeat only beats while you have a terminal open, so a
-reminder due at 3pm goes off whenever you next happen to start Ada. A launchd
-agent fixes that: it starts at login, restarts if it dies, and keeps checking
-whether or not you're talking to her.
+reminder due at 3pm goes off whenever you next happen to start Ada — and a
+background job only runs while you're sitting there watching it, which rather
+defeats the point. A launchd agent fixes that: it starts at login, restarts if
+it dies, and keeps working whether or not you're talking to her.
+
+**The dashboard comes with it.** `heartbeat_main.py` serves the face at
+<http://127.0.0.1:4173>, so it's up from login. That's one agent rather than
+two on purpose: `ada/status.py` is process memory, so a dashboard in its own
+process would report `idle` with an empty tool list forever while this one ran
+the jobs. The dashboard belongs to the process actually doing something.
+
+It stays bound to `127.0.0.1`. Nothing on your network can reach it, which is
+what makes it safe to have no authentication on `/api/approvals/<id>/approve` —
+a click there authorises a background job to send an email or spend money, and
+the only thing standing between that and the rest of the world is the loopback
+bind. **Don't change the bind address without putting auth in front of it.**
 
 Running the agent and a REPL at the same time is safe — `ada/heartbeat/singleton.py`
 gives the heartbeat to exactly one process, and the other just reads notices.
@@ -24,7 +37,18 @@ Check it came up:
 ```sh
 launchctl list | grep com.ada.heartbeat   # second column 0 = healthy
 tail -f data/heartbeat.out
+open http://127.0.0.1:4173
 ```
+
+## Running a REPL at the same time
+
+Safe, and expected. The daemon holds the heartbeat lock and the dashboard port,
+so the REPL prints a line saying it's using the daemon's dashboard rather than
+starting its own. Your conversation still shows up there — the chat panel falls
+back to the transcript on disk and marks it `from disk`. What won't show is the
+REPL's *live* state: the streaming reply, the armed tool list, and a
+confirmation waiting on a keypress. Those are process memory, and they belong
+to the terminal you're typing in.
 
 ## Stop / uninstall
 

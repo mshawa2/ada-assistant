@@ -76,8 +76,6 @@ affect a real person:
   credentials.
 - **A real smart home.** No Home Assistant token; the Shortcuts fallback is
   live on this machine.
-- **A rendered dashboard page** — the sandboxed browser can't reach localhost.
-  Every API call it makes was verified over real HTTP.
 
 ## First capabilities
 
@@ -1769,6 +1767,78 @@ live message list it hands the model, or leave the loop it's sitting in.
 Verified by driving the real text REPL end to end — `help`, `status`, `be
 quiet`, `status`, `carry on`, `reset`, `goodbye` — with no model calls at all,
 which is the point of them.
+
+## The dashboard, catching up with the OS (built and verified in a browser)
+
+The face was built when Ada was an assistant. Jobs, approvals, schedules,
+budgets-per-job and recurrence all arrived after it, and **none of it was on
+the page.** The only trace of a job blocked waiting for you was a *notice* —
+with a "clear" button that dismissed the notice and left the job blocked
+forever, hiding the one thing that needed you.
+
+### What it now shows
+
+**Waiting on you** sits under the core and hides itself entirely when there's
+nothing blocked, because it's the only panel here that means "nothing moves
+until you look at this". **Jobs** and **Scheduled** joined the right rail —
+Ada's own vitals stay on the left, what's *happening* is on the right.
+
+**Approve and Refuse work from the browser.** That's the change that earns the
+dashboard its keep: with the daemon running and no terminal open, a parked job
+previously had no way to be answered at all — you had to start a REPL to
+unblock it. There's no second confirmation on those buttons and there shouldn't
+be. `resolve_approval` is gated because a *model* might be calling it; a click
+on a loopback-only page is a person deciding, which is what the gate was trying
+to reach in the first place.
+
+### Three real bugs, all found by opening it
+
+`AGENT.md` had listed "a rendered dashboard page" as unverified — the sandboxed
+browser couldn't reach localhost. It can now, and looking at it immediately
+turned up things no test would have:
+
+1. **The rails have load-bearing row counts.** `.rail.left` was
+   `grid-template-rows: auto auto minmax(0,1fr)` — three rows for three panels.
+   A fourth got an implicit row, the rail overflowed its fixed height, and it
+   spilled *over the column beside it*. Adding a panel to a rail means adding a
+   row; there's a comment there now saying so.
+2. **Half my CSS was dead.** I wrote `.core > .core-panel`; the class is
+   `.middle`. It looked fine by luck, because flex defaults happened to land in
+   roughly the right place.
+3. **Polling destroyed the buttons.** Every panel rebuilt its `innerHTML` every
+   four seconds, so a click could land on an element that had just been
+   replaced — Approve genuinely failed to register. The chat and armed panels
+   already guarded against this; the guard is now shared.
+
+### The conversation panel, when nothing is live
+
+`ada/status.py` is process memory. `/api/conversation` falls back to the
+persisted transcript and labels it `from disk`, so the dashboard served by the
+daemon shows the real recent conversation instead of looking dead. The recap
+Ada writes to herself is filtered out — it's bookkeeping, not conversation.
+
+## Deployment (macOS, local only)
+
+`heartbeat_main.py` now serves the face, and **that's one agent rather than
+two on purpose.** A dashboard in its own process would report `idle` with an
+empty tool list forever, because the process actually running jobs is the
+heartbeat. The dashboard belongs to the process that's doing something.
+
+Installed as `~/Library/LaunchAgents/com.ada.heartbeat.plist`: starts at login,
+restarts if it dies, serves <http://127.0.0.1:4173>.
+
+**It stays bound to loopback, and that's the whole security model.** There is no
+authentication on `/api/approvals/<id>/approve`, and a click there authorises a
+background job to send an email or spend money. Nothing on the network can
+reach it. Changing the bind address without putting auth in front of it would
+hand that control surface to anyone on the wifi.
+
+Running a REPL alongside is safe and expected: the daemon holds the heartbeat
+lock and the dashboard port, so the REPL says it's using the daemon's dashboard
+rather than starting its own. The conversation still reaches the page via the
+transcript on disk. What doesn't is the REPL's *live* state — the streaming
+reply, the armed list, a confirmation waiting on a keypress. Those are process
+memory and belong to the terminal you're typing in.
 
 ## Consolidation notes
 

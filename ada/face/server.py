@@ -30,7 +30,15 @@ def start() -> threading.Thread | None:
             # daemon thread anyway.
             make_server("127.0.0.1", PORT, app, threaded=True).serve_forever()
         except OSError as e:
-            print(f"\n[face: couldn't start dashboard on port {PORT}: {e}]", flush=True)
+            # Almost always the always-on daemon already serving it, which is
+            # fine and worth saying plainly — the dashboard is still there, and
+            # this session's conversation still reaches it via the transcript
+            # on disk. What it won't show is this process's live state.
+            print(
+                f"\n[face: port {PORT} is already serving a dashboard — using that one. "
+                f"This session's live status won't appear on it. ({e})]",
+                flush=True,
+            )
 
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()
