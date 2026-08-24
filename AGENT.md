@@ -1768,6 +1768,33 @@ Verified by driving the real text REPL end to end — `help`, `status`, `be
 quiet`, `status`, `carry on`, `reset`, `goodbye` — with no model calls at all,
 which is the point of them.
 
+## The dashboard's look (rebuilt to a reference the user supplied)
+
+The HUD — cyan on blue-black, clipped angular panels, corner brackets, an
+animated orb, scanlines — was replaced with a dark analytics layout: neutral
+near-black, one amber accent, rounded cards, a sidebar, a row of stat tiles and
+a real chart. The user gave a screenshot of what they wanted; this is that
+language applied to Ada's own state.
+
+**Nothing here is invented to fill a shape.** The chart is `budget.daily()`
+over the real spend ledger, which is why it can only ever reach back as far as
+a cap is configured for. Empty days are drawn as zeroes rather than skipped: a
+chart that omits them draws a straight line through a week you didn't use Ada
+and calls it steady usage.
+
+The four tiles beside it were briefly token counts, and that was wrong —
+`cost.py` is *this process's* in-memory tally, so on the daemon they read zero
+forever next to a chart showing real money. They now come off the spend series
+(today, average per active day, busiest day, days used), which is on disk and
+true wherever the page is served from. The average is over days Ada was
+actually used, not the whole window; a month of zeroes divided into a busy week
+is a number about nothing.
+
+The page still asks the network for nothing — no CDN, no web font, no chart
+library. There's no build step to inline them and the server is loopback-only,
+so anything fetched from elsewhere is a dependency that can break the one page
+that tells you what Ada is doing. A test enforces it.
+
 ## The dashboard, catching up with the OS (built and verified in a browser)
 
 The face was built when Ada was an assistant. Jobs, approvals, schedules,

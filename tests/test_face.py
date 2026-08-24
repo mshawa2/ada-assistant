@@ -73,7 +73,7 @@ def test_a_non_tool_status_clears_the_tool():
 
 
 def test_waiting_on_a_human_outranks_whatever_else_is_happening():
-    """The orb must never look busy while it's actually blocked on you."""
+    """Ada must never look busy while she's actually blocked on you."""
     status.set_status("thinking...")
     status.begin_confirmation("Ada wants to do something")
 
@@ -239,7 +239,19 @@ def test_the_page_is_served(client):
     response = client.get("/")
 
     assert response.status_code == 200
-    assert b"orb" in response.data
+    assert b"<title>Ada</title>" in response.data
+
+
+def test_the_page_asks_the_network_for_nothing():
+    """No build step and a loopback-only server: a font or a chart library
+    fetched from anywhere else is a dependency that can break the one page
+    that tells you what Ada is doing."""
+    from pathlib import Path as _Path
+
+    page = (_Path(__file__).resolve().parent.parent / "ada/face/static/index.html").read_text()
+
+    for offender in ("http://", "https://", "//cdn", "<script src", "<link rel=\"stylesheet\""):
+        assert offender not in page, f"the dashboard reaches out for {offender}"
 
 
 @pytest.mark.parametrize(

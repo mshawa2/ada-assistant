@@ -133,6 +133,31 @@ def record(category: str, amount: float, note: str = "") -> None:
         store.write_json(_STORE, ledger)
 
 
+def daily(category: str, days: int = 30) -> list[dict]:
+    """What was spent each day, oldest first, with the empty days present.
+
+    The ledger is already pruned to the longest configured window, so this can
+    only ever see back as far as a cap is set for — a month, by default.
+
+    Empty days are included on purpose: a chart that skips them draws a
+    straight line through a week you didn't use Ada and calls it steady usage.
+    """
+    now = time.time()
+    start_of_today = now - (now % 86400)
+
+    with _lock:
+        entries = _load().get(category, [])
+
+    buckets = {start_of_today - offset * 86400: 0.0 for offset in range(days)}
+    for entry in entries:
+        at = entry.get("at", 0)
+        day = at - (at % 86400)
+        if day in buckets:
+            buckets[day] += entry.get("amount", 0.0)
+
+    return [{"at": day, "amount": amount} for day, amount in sorted(buckets.items())]
+
+
 def gauges() -> list[dict]:
     """Every configured cap with what's been spent against it, as numbers.
 

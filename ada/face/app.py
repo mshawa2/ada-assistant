@@ -119,6 +119,9 @@ def api_jobs():
             "budget": job.get("budget_usd"),
             "tools": job.get("tools"),
             "attempts": job.get("attempts", 0),
+            "at": job.get("finished_at") or job.get("started_at") or job.get("created_at"),
+            "result": job.get("result"),
+            "error": job.get("error"),
         }
 
     return jsonify({"open": [row(j) for j in open_jobs], "closed": [row(j) for j in reversed(closed)]})
@@ -177,6 +180,27 @@ def api_schedules():
                 key=lambda s: (not s.get("enabled", True), s.get("next_due_at", 0)),
             )
         ]
+    )
+
+
+@app.route("/api/usage")
+def api_usage():
+    """The spend chart's series, plus the totals beside it."""
+    days = request.args.get("days", type=int) or 30
+    series = budget.daily(budget.MODEL, days=min(max(days, 7), 30))
+    window = budget.WINDOWS["per_day"] if days <= 1 else days * 86400
+
+    return jsonify(
+        {
+            "series": series,
+            "days": days,
+            "total": sum(point["amount"] for point in series),
+            "today": budget.spent(budget.MODEL, budget.WINDOWS["per_day"]),
+            "month": budget.spent(budget.MODEL, budget.WINDOWS["per_month"]),
+            "window": window,
+            "tokens": cost.totals(),
+            "gauges": budget.gauges(),
+        }
     )
 
 

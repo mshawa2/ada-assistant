@@ -4,573 +4,325 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ada</title>
-<!-- Inline so the tab carries the core's colour instead of a 404 in the
-     console of a page that's meant to sit open all day. -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='9' fill='%236fd8ff'/%3E%3C/svg%3E">
-<!--
-  One file, no build step, no dependencies — the same choice the first
-  dashboard made, kept because it's still right for something you open on
-  localhost and never deploy.
-
-  This is the command-deck version: a wall of panels rather than a page you
-  scroll. The rule it's built on is that every readout is a real number Ada
-  actually holds — spend against the caps in `ada/budget.py`, the tools
-  `ada/routing.py` armed for this turn, the audit tail. Nothing here is
-  decorative telemetry. A HUD that invents numbers is a screensaver, and you
-  can't trust the true readings sitting next to the invented ones.
-
-  The core is still driven entirely by the `state` the backend derives (idle /
-  listening / transcribing / thinking / tool / speaking / waiting), so the
-  front end never pattern-matches on prose. States now retint the whole deck
-  through a couple of custom properties: amber while a tool runs, red while
-  it's blocked on you. That's a colour change in one place, not a mode.
-
-  Everything animates in CSS. It costs nothing when idle, which matters for a
-  thing meant to sit open on a second screen all day.
--->
 <style>
-  :root {
-    --bg: #04070c;
-    --cyan: #6fd8ff;
-    --accent: #6fd8ff;                     /* retinted per state */
-    --edge: rgba(111, 216, 255, .22);
-    --fill: rgba(111, 216, 255, .04);
-    --glow: rgba(111, 216, 255, .16);
-    --text: #d6e8f5;
-    --dim: #5d7d95;
-    --go: #4ade80;
-    --stop: #f87171;
-    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    --gap: 12px;
-  }
-  /* A tool run tints the whole wall warm; being blocked on a human turns it
-     red. Same panels, unmistakably different mood — you can read the room
-     from across it without reading a word. */
-  body[data-state="tool"] {
-    --accent: #ffb469; --edge: rgba(255, 180, 105, .28);
-    --fill: rgba(255, 180, 105, .05); --glow: rgba(255, 180, 105, .18);
-  }
-  body[data-state="waiting"] {
-    --accent: #ff7676; --edge: rgba(255, 118, 118, .34);
-    --fill: rgba(255, 118, 118, .06); --glow: rgba(255, 118, 118, .2);
-  }
+/* ---------------------------------------------------------------------------
+   Ada — agent OS dashboard.
 
-  * { box-sizing: border-box; }
-  html, body { height: 100%; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
-    font: 14px/1.5 ui-rounded, -apple-system, "SF Pro Text", system-ui, sans-serif;
-  }
+   Everything on this page is real state read from `data/`. Where a number
+   would have to be invented to fill a shape, the shape isn't here.
 
-  /* --- the room behind the glass ------------------------------------------
-     Three fixed layers: a floor receding to a horizon, a wash of light where
-     the core sits, and scanlines over everything. */
-  .room { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
-  .floor {
-    position: absolute; left: -50%; right: -50%; bottom: -20%; height: 80%;
-    background:
-      repeating-linear-gradient(90deg, transparent 0 78px, var(--edge) 78px 79px),
-      repeating-linear-gradient(0deg, transparent 0 46px, var(--edge) 46px 47px);
-    transform: perspective(420px) rotateX(74deg);
-    transform-origin: 50% 100%; opacity: .5;
-    -webkit-mask-image: linear-gradient(transparent, #000 55%);
-    mask-image: linear-gradient(transparent, #000 55%);
-    animation: floor-run 5.5s linear infinite;
-  }
-  @keyframes floor-run { to { background-position: 0 47px, 0 47px; } }
-  .wash {
-    position: absolute; inset: -25%;
-    background: radial-gradient(38% 42% at 50% 42%, var(--glow), transparent 68%);
-    animation: drift 22s ease-in-out infinite alternate;
-  }
-  @keyframes drift { to { transform: translate3d(0, 4%, 0) scale(1.14); } }
-  .scan {
-    position: absolute; inset: 0; opacity: .5;
-    background: repeating-linear-gradient(0deg, rgba(0,0,0,.5) 0 1px, transparent 1px 3px);
-  }
-  .scan::after {
-    /* one bright line, endlessly falling — the thing that makes it read as a
-       display rather than a printed page */
-    content: ""; position: absolute; left: 0; right: 0; height: 130px;
-    background: linear-gradient(transparent, var(--glow), transparent);
-    opacity: .5; animation: fall 7s linear infinite;
-  }
-  @keyframes fall { from { top: -140px; } to { top: 100%; } }
-  .vignette {
-    position: absolute; inset: 0;
-    background: radial-gradient(70% 60% at 50% 45%, transparent 40%, rgba(0,0,0,.72));
-  }
+   Self-contained by necessity, not preference: no build step, no CDN, and the
+   server is bound to loopback, so a font or a chart library fetched from
+   anywhere else is a dependency that can break the one page that tells you
+   what Ada is doing.
+--------------------------------------------------------------------------- */
+:root {
+  --bg: #0b0b0d;
+  --panel: #141417;
+  --panel-2: #1a1a1f;
+  --line: #26262c;
+  --line-soft: #1f1f24;
+  --text: #ececee;
+  --dim: #8a8a94;
+  --dimmer: #5f5f68;
+  --accent: #f97316;
+  --accent-soft: rgba(249, 115, 22, .13);
+  --up: #4ade80;
+  --down: #f87171;
+  --warn: #fbbf24;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  --r: 14px;
+  --r-sm: 10px;
+}
 
-  /* --- deck layout --------------------------------------------------------- */
-  .deck {
-    position: relative; z-index: 1; height: 100%; display: grid; gap: var(--gap);
-    padding: var(--gap);
-    grid-template-columns: 274px minmax(0, 1fr) 310px;
-    grid-template-rows: 34px minmax(0, 1fr) 20px;
-    grid-template-areas:
-      "top  top   top"
-      "left core  right"
-      "foot foot  foot";
-  }
-  .rail { display: grid; gap: var(--gap); min-height: 0; }
-  .rail.left  { grid-area: left;  grid-template-rows: auto auto minmax(0, 1fr); }
-  /* One row per panel, and the count is load-bearing: a panel past the end
-     of this template gets an implicit row, the rail overflows its fixed
-     height, and it spills over the column beside it. Adding a panel here
-     means adding a row. */
-  .rail.right { grid-area: right; grid-template-rows: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .8fr); }
-  .middle {
-    grid-area: core; display: flex; flex-direction: column; gap: var(--gap); min-height: 0;
-  }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #2c2c33; border-radius: 99px; }
+::-webkit-scrollbar-track { background: transparent; }
 
-  /* --- the panels ---------------------------------------------------------
-     A notched corner and two bracket marks. Cheap, and it's what makes a box
-     read as an instrument rather than a card. */
-  .panel {
-    position: relative; min-height: 0; display: flex; flex-direction: column;
-    background: linear-gradient(160deg, var(--fill), rgba(6, 16, 26, .62));
-    border: 1px solid var(--edge);
-    clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 15px 100%, 0 calc(100% - 15px));
-    backdrop-filter: blur(3px);
-    animation: rise .65s cubic-bezier(.2, .8, .2, 1) both;
-    animation-delay: var(--d, 0s);
-    transition: border-color .5s ease;
-  }
-  @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
-  .panel::before, .panel::after {
-    content: ""; position: absolute; width: 13px; height: 13px;
-    border: 1px solid var(--accent); opacity: .8; pointer-events: none;
-    transition: border-color .5s ease;
-  }
-  .panel::before { top: 5px; left: 5px; border-width: 1px 0 0 1px; }
-  .panel::after { bottom: 5px; right: 5px; border-width: 0 1px 1px 0; }
+/* --- shell ---------------------------------------------------------------- */
+.app {
+  display: grid; height: 100%;
+  grid-template-columns: 232px minmax(0, 1fr) 400px;
+}
+.side { border-right: 1px solid var(--line); padding: 18px 14px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+.main { padding: 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+.aside { border-left: 1px solid var(--line); padding: 18px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
 
-  .p-head {
-    display: flex; align-items: center; gap: 9px; padding: 9px 13px 8px;
-    border-bottom: 1px solid var(--edge); flex: none;
-  }
-  .p-head h2 {
-    margin: 0; font-size: 10px; font-weight: 700; letter-spacing: .2em;
-    text-transform: uppercase; color: var(--accent); white-space: nowrap;
-    transition: color .5s ease;
-  }
-  .p-head .hatch {
-    flex: 1; height: 7px; opacity: .45;
-    background: repeating-linear-gradient(115deg, var(--accent) 0 1px, transparent 1px 5px);
-  }
-  .p-head .meta { font: 10px/1 var(--mono); letter-spacing: .12em; color: var(--dim); white-space: nowrap; }
-  .p-body { padding: 11px 13px 13px; overflow-y: auto; min-height: 0; flex: 1; }
-  .p-body::-webkit-scrollbar { width: 4px; }
-  .p-body::-webkit-scrollbar-thumb { background: var(--edge); }
+/* --- sidebar -------------------------------------------------------------- */
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand .glyph {
+  width: 30px; height: 30px; border-radius: 9px; flex: none;
+  background: linear-gradient(145deg, var(--accent), #c2410c);
+  display: grid; place-items: center; font-weight: 700; font-size: 14px; color: #1a0d04;
+}
+.brand b { font-size: 14.5px; font-weight: 650; letter-spacing: -.01em; display: block; }
+.brand span { font: 10px/1 var(--mono); color: var(--dimmer); }
 
-  /* --- header + footer strips --------------------------------------------- */
-  .strip {
-    display: flex; align-items: center; gap: 14px;
-    font: 10px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; color: var(--dim);
-  }
-  .top { grid-area: top; border-bottom: 1px solid var(--edge); padding-bottom: 9px; }
-  .foot { grid-area: foot; border-top: 1px solid var(--edge); padding-top: 7px; }
-  .mark { display: flex; align-items: baseline; gap: 9px; }
-  .mark b {
-    font: 700 17px/1 ui-rounded, system-ui, sans-serif; letter-spacing: .42em;
-    color: var(--text); text-transform: uppercase;
-  }
-  .mark span { color: var(--accent); transition: color .5s ease; }
-  .live { display: flex; align-items: center; gap: 7px; color: var(--accent); transition: color .5s ease; }
-  .live i {
-    width: 6px; height: 6px; background: var(--accent); border-radius: 50%;
-    box-shadow: 0 0 9px var(--accent); animation: pip 2.4s ease-in-out infinite;
-  }
-  @keyframes pip { 50% { opacity: .25; } }
-  .spacer { flex: 1; }
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav a {
+  display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: var(--r-sm);
+  color: var(--dim); text-decoration: none; font-size: 13px; font-weight: 500;
+}
+.nav a.on { background: var(--panel-2); color: var(--text); }
+.nav a i { width: 6px; height: 6px; border-radius: 99px; background: currentColor; opacity: .55; }
+.nav a.on i { background: var(--accent); opacity: 1; }
 
-  /* --- the core ------------------------------------------------------------
-     The one panel with no fill of its own: the room's floor and light have to
-     read *through* the core, or it looks stuck to a card instead of hanging in
-     the air. */
-  .core-panel { align-items: center; justify-content: center; background: none; backdrop-filter: none; }
-  .stage {
-    position: relative; width: 320px; height: 320px; max-width: 100%;
-    display: grid; place-items: center; margin-bottom: 54px;
-  }
-  .rings { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-  .rings circle, .rings path, .rings polygon, .rings line {
-    fill: none; stroke: var(--accent); transition: stroke .5s ease;
-  }
-  .spin-slow { animation: spin 66s linear infinite; }
-  .spin-back { animation: spin 26s linear infinite reverse; }
-  .spin-fast { animation: spin 11s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+.sidecard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 12px; }
+.statechip { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 550; text-transform: capitalize; }
+.statechip .pulse { width: 8px; height: 8px; border-radius: 99px; background: var(--dim); flex: none; }
+body[data-state="thinking"] .statechip .pulse,
+body[data-state="listening"] .statechip .pulse { background: var(--accent); animation: breathe 1.4s ease-in-out infinite; }
+body[data-state="waiting"] .statechip .pulse { background: var(--warn); animation: breathe .9s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: .25; } }
+.statechip small { color: var(--dimmer); font: 10px/1 var(--mono); margin-left: auto; }
 
-  .halo {
-    position: absolute; width: 210px; height: 210px; border-radius: 50%;
-    background: radial-gradient(circle, var(--glow), transparent 68%);
-    animation: breathe 5s ease-in-out infinite;
-  }
-  .orb {
-    position: relative; width: 88px; height: 88px; border-radius: 50%;
-    background: radial-gradient(circle at 34% 30%, #fff, var(--accent) 44%, rgba(6, 40, 58, .95) 100%);
-    box-shadow: 0 0 46px -6px var(--accent), inset 0 0 26px rgba(255, 255, 255, .32);
-    transition: background .5s ease, box-shadow .5s ease, transform .3s ease, opacity .3s ease;
-  }
-  .sonar {
-    position: absolute; width: 300px; height: 300px; border-radius: 50%;
-    border: 1px solid var(--accent); opacity: 0; pointer-events: none;
-  }
+.kv { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; font-size: 12px; }
+.kv + .kv { border-top: 1px solid var(--line-soft); }
+.kv .k { color: var(--dim); }
+.kv .v { font-family: var(--mono); font-size: 11.5px; }
 
-  /* idle: a slow breath, so it reads as awake but not doing anything */
-  [data-state="idle"] .orb { animation: breathe 5s ease-in-out infinite; }
-  @keyframes breathe { 50% { transform: scale(1.05); } }
+.side .foot { margin-top: auto; font: 10px/1.6 var(--mono); color: var(--dimmer); }
 
-  /* listening: rings pushing outward, like it's reaching for sound */
-  [data-state="listening"] .sonar { animation: sonar 2s ease-out infinite; }
-  [data-state="listening"] .sonar:nth-of-type(2) { animation-delay: .66s; }
-  [data-state="listening"] .sonar:nth-of-type(3) { animation-delay: 1.32s; }
-  @keyframes sonar {
-    0% { transform: scale(.32); opacity: .5; }
-    100% { transform: scale(1); opacity: 0; }
-  }
+/* --- generic card --------------------------------------------------------- */
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); }
+.card > header {
+  display: flex; align-items: center; gap: 10px; padding: 13px 15px 11px;
+}
+.card > header h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
+.card > header .count { margin-left: auto; font: 11px/1 var(--mono); color: var(--dim); }
+.card > .body { padding: 0 15px 14px; }
+.card > .body.scroll { max-height: 320px; overflow-y: auto; }
+.empty { color: var(--dimmer); font-size: 12.5px; padding: 4px 0 8px; }
 
-  /* thinking / transcribing: tighter, faster, a bit impatient — and the arc
-     ring spins up with it, which is the part you see from across the room */
-  [data-state="thinking"] .orb, [data-state="transcribing"] .orb { animation: think .9s ease-in-out infinite; }
-  [data-state="thinking"] .spin-fast, [data-state="transcribing"] .spin-fast { animation-duration: 2.4s; }
-  [data-state="thinking"] .spin-back, [data-state="transcribing"] .spin-back { animation-duration: 9s; }
-  @keyframes think { 50% { transform: scale(.9); filter: brightness(1.3); } }
+/* --- stat tiles ----------------------------------------------------------- */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 13px 14px; }
+.stat .top { display: flex; align-items: center; gap: 8px; }
+.stat .label { font-size: 11.5px; color: var(--dim); font-weight: 500; }
+.stat .mark { margin-left: auto; width: 7px; height: 7px; border-radius: 2px; background: var(--dimmer); }
+.stat.hot .mark { background: var(--accent); }
+.stat.alert .mark { background: var(--down); }
+.stat .n { font: 600 26px/1.2 var(--sans); letter-spacing: -.02em; margin-top: 7px; font-variant-numeric: tabular-nums; }
+.stat.alert .n { color: var(--down); }
+.stat .sub { font-size: 11px; color: var(--dimmer); margin-top: 1px; }
 
-  /* using a tool: the whole deck has already gone amber; the core hurries */
-  [data-state="tool"] .orb { animation: think .7s ease-in-out infinite; }
-  [data-state="tool"] .spin-fast { animation-duration: 3.6s; }
+/* --- rows (jobs, schedules, notices) -------------------------------------- */
+.row { display: flex; gap: 11px; align-items: flex-start; padding: 10px 0; }
+.row + .row { border-top: 1px solid var(--line-soft); }
+.row .icon {
+  width: 30px; height: 30px; border-radius: 9px; flex: none; display: grid; place-items: center;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: 12px;
+}
+.row .body { flex: 1; min-width: 0; }
+.row .t { font-size: 13px; font-weight: 500; line-height: 1.35; }
+.row .m { font: 11px/1.5 var(--mono); color: var(--dimmer); margin-top: 2px; }
+.row .right { flex: none; text-align: right; }
+.row .right .big { font: 600 15px/1.2 var(--sans); font-variant-numeric: tabular-nums; }
+.row .right .ago { font: 10px/1.4 var(--mono); color: var(--dimmer); margin-top: 2px; }
 
-  /* speaking: the waveform, which is the one moment you want to look at it.
-     The orb drops right back and dims to a glow — at full strength the bars
-     sat on top of it and the whole thing read as a muddle rather than a
-     waveform. */
-  [data-state="speaking"] .orb { animation: none; transform: scale(.34); opacity: .28; filter: blur(6px); }
-  .wave { position: absolute; inset: 0; display: none; }
-  [data-state="speaking"] .wave { display: block; }
-  .wave i {
-    position: absolute; top: 50%; left: 50%; width: 3px; height: 16px;
-    margin: -8px 0 0 -1.5px; border-radius: 2px; background: var(--accent);
-    box-shadow: 0 0 8px var(--accent);
-    transform: rotate(calc(var(--i) * 10deg)) translateY(-74px);
-    animation: talk .68s ease-in-out infinite;
-    animation-delay: calc(var(--i) * -.045s);
-  }
-  @keyframes talk { 50% { height: 44px; margin-top: -22px; } }
+.tag {
+  display: inline-block; font: 10px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase;
+  padding: 4px 7px; border-radius: 6px; border: 1px solid var(--line); color: var(--dim); white-space: nowrap;
+}
+.tag.running { color: var(--accent); border-color: rgba(249,115,22,.4); background: var(--accent-soft); }
+.tag.pending { color: var(--dim); }
+.tag.waiting_approval { color: var(--down); border-color: rgba(248,113,113,.45); background: rgba(248,113,113,.1); }
+.tag.done { color: var(--up); border-color: rgba(74,222,128,.35); }
+.tag.failed, .tag.cancelled { color: var(--down); border-color: rgba(248,113,113,.3); }
+.tag.off { opacity: .5; }
 
-  /* waiting on you: insistent, impossible to mistake for working */
-  [data-state="waiting"] .orb { animation: urgent .8s ease-in-out infinite; }
-  @keyframes urgent { 50% { transform: scale(1.09); } }
+/* --- the one panel that means "nothing moves until you look" -------------- */
+#blocked { border-color: rgba(248,113,113,.45); background: linear-gradient(180deg, rgba(248,113,113,.06), transparent 60%); }
+#blocked > header h2 { color: var(--down); }
+.ask { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel-2); padding: 11px 12px; margin-top: 9px; }
+.ask .who { font-size: 12px; color: var(--dim); }
+.ask .what { font-size: 13.5px; margin-top: 5px; line-height: 1.45; }
+.ask .acts { display: flex; gap: 7px; margin-top: 11px; }
 
-  .readout { position: absolute; bottom: -50px; left: -60px; right: -60px; text-align: center; }
-  .readout .state {
-    font: 700 14px/1 var(--mono); letter-spacing: .34em; text-transform: uppercase;
-    color: var(--accent); transition: color .5s ease;
-  }
-  .readout .sub {
-    margin-top: 7px; font: 10px/1.4 var(--mono); letter-spacing: .18em;
-    color: var(--dim); text-transform: uppercase;
-  }
+button {
+  font: 500 12px/1 var(--sans); padding: 8px 13px; border-radius: 8px; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+}
+button:hover { border-color: #35353d; }
+button.go { background: rgba(74,222,128,.13); border-color: rgba(74,222,128,.45); color: var(--up); }
+button.stop { background: rgba(248,113,113,.13); border-color: rgba(248,113,113,.45); color: var(--down); }
+button.ghost { padding: 5px 9px; font-size: 11px; color: var(--dim); }
+.pills { display: flex; gap: 4px; margin-left: auto; }
+.pills button { padding: 5px 9px; font: 500 11px/1 var(--mono); }
+.pills button.on { background: var(--accent-soft); border-color: rgba(249,115,22,.45); color: var(--accent); }
 
-  /* --- confirmation, over the core ---------------------------------------- */
-  #confirm {
-    position: absolute; inset: 12px; z-index: 3; display: none;
-    /* Opaque, unlike every other panel. This is the one thing on the wall you
-       have to read exactly — the core turning behind the words was pretty and
-       made a phone number harder to check. */
-    background: linear-gradient(160deg, #2a0a10 0%, #0d0407 65%);
-    backdrop-filter: blur(10px);
-    border-color: rgba(255, 118, 118, .55); animation: alarm 1.3s ease-in-out infinite;
-  }
-  #confirm.show { display: flex; }
-  @keyframes alarm { 50% { border-color: rgba(255, 118, 118, .16); } }
-  /* While there's a question on screen, the core gets out of the way entirely
-     rather than turning behind it — the ring's ticks and the state readout
-     both poked out past the overlay's edges. */
-  .core-panel:has(#confirm.show) .stage { opacity: 0; }
-  .stage { transition: opacity .3s ease; }
-  #confirm .p-body { display: flex; flex-direction: column; justify-content: center; }
-  #confirm pre {
-    white-space: pre-wrap; word-break: break-word; margin: 0 0 18px;
-    font-family: inherit; font-size: 15px; line-height: 1.55; color: #ffe4e4;
-  }
-  .buttons { display: flex; gap: 10px; }
-  button {
-    font: 600 12px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase;
-    padding: 9px 16px; cursor: pointer; color: var(--text);
-    border: 1px solid var(--edge); background: rgba(255, 255, 255, .05);
-    clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
-    transition: background .2s ease, border-color .2s ease;
-  }
-  button:hover { background: rgba(255, 255, 255, .12); }
-  button.go { background: rgba(74, 222, 128, .14); border-color: rgba(74, 222, 128, .5); color: var(--go); }
-  button.stop { background: rgba(248, 113, 113, .14); border-color: rgba(248, 113, 113, .5); color: var(--stop); }
-  button.tiny { padding: 4px 9px; font-size: 10px; letter-spacing: .12em; }
+/* --- usage / chart -------------------------------------------------------- */
+.headline { display: flex; align-items: baseline; gap: 9px; }
+.headline .n { font: 650 30px/1.1 var(--sans); letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
+.delta { font: 500 12px/1 var(--sans); padding: 4px 7px; border-radius: 99px; }
+.delta.up { color: var(--up); background: rgba(74,222,128,.12); }
+.delta.flat { color: var(--dim); background: var(--panel-2); }
+.cap { font-size: 11.5px; color: var(--dimmer); margin-top: 3px; }
+.chart { margin-top: 12px; }
+.chart svg { display: block; width: 100%; height: 92px; }
+.axis { display: flex; justify-content: space-between; font: 10px/1 var(--mono); color: var(--dimmer); margin-top: 6px; }
 
-  /* --- conversation -------------------------------------------------------- */
-  #chat { display: flex; flex-direction: column; gap: 13px; }
-  .turn { display: grid; grid-template-columns: 2px 40px 1fr; gap: 10px; align-items: stretch; }
-  .turn .tick { background: var(--edge); min-height: 16px; }
-  .turn.ada .tick { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-  .who {
-    font: 10px/1.5 var(--mono); letter-spacing: .16em; text-transform: uppercase;
-    color: var(--dim); padding-top: 2px;
-  }
-  .turn.ada .who { color: var(--accent); }
-  .said { white-space: pre-wrap; word-break: break-word; }
-  .turn.you .said { color: #9fb4c8; }
-  .cursor::after { content: "\258C"; color: var(--accent); animation: blink 1s steps(2) infinite; margin-left: 1px; }
-  @keyframes blink { 50% { opacity: 0; } }
-  .empty { color: var(--dim); font-style: italic; }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 14px; }
+.tile { background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 9px 10px; }
+.tile .l { font: 9.5px/1 var(--mono); letter-spacing: .06em; color: var(--dimmer); text-transform: uppercase; }
+.tile .v { font: 600 14px/1.2 var(--sans); margin-top: 5px; font-variant-numeric: tabular-nums; }
 
-  /* --- readouts: rows, gauges, chips, feed --------------------------------- */
-  .kv { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 5px 0; }
-  .kv + .kv { border-top: 1px solid rgba(255, 255, 255, .05); }
-  .kv .k { font: 10px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
-  .kv .v { font: 12px/1 var(--mono); color: var(--text); text-align: right; }
-  .kv .v.hot { color: var(--accent); transition: color .5s ease; }
+.gauge { margin-top: 10px; }
+.gauge + .gauge { margin-top: 8px; }
+.gauge .line { display: flex; justify-content: space-between; font-size: 11.5px; }
+.gauge .line .k { color: var(--dim); }
+.gauge .line .v { font-family: var(--mono); font-size: 11px; }
+.gauge .bar { height: 4px; border-radius: 99px; background: var(--panel-2); margin-top: 5px; overflow: hidden; }
+.gauge .bar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.gauge.over .bar i { background: var(--down); }
 
-  .gauge + .gauge { margin-top: 11px; }
-  .gauge .g-top { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
-  .gauge .g-top span:first-child {
-    font: 10px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--dim);
-  }
-  .gauge .g-top span:last-child { font: 11px/1 var(--mono); color: var(--text); }
-  .g-track { height: 5px; background: rgba(255, 255, 255, .07); overflow: hidden; }
-  .g-track i {
-    display: block; height: 100%; background: var(--accent);
-    box-shadow: 0 0 10px var(--accent); transition: width .6s ease;
-  }
-  .g-track i.over { background: var(--stop); box-shadow: 0 0 10px var(--stop); }
+/* --- conversation --------------------------------------------------------- */
+#chat { display: flex; flex-direction: column; gap: 11px; }
+.turn { display: flex; gap: 10px; }
+.turn .who {
+  font: 10px/1 var(--mono); color: var(--dimmer); text-transform: uppercase;
+  width: 26px; flex: none; padding-top: 4px;
+}
+.turn .said { font-size: 13.5px; line-height: 1.5; }
+.turn.ada .said { color: var(--text); }
+.turn.you .said { color: var(--dim); }
+.said.cursor::after {
+  content: ""; display: inline-block; width: 6px; height: 13px; background: var(--accent);
+  margin-left: 3px; vertical-align: -2px; animation: blink .9s steps(2) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
 
-  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
-  .chip {
-    font: 10px/1 var(--mono); letter-spacing: .06em; padding: 5px 7px; color: var(--dim);
-    border: 1px solid var(--edge); background: rgba(255, 255, 255, .03);
-  }
-  .chip.running { color: #06121c; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+/* --- activity ------------------------------------------------------------- */
+.log { font: 11px/1.9 var(--mono); }
+.log div { display: flex; gap: 10px; }
+.log .t { color: var(--dimmer); flex: none; }
+.log .n { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .notice { display: flex; gap: 9px; align-items: flex-start; padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, .06); }
-  .notice:first-child { border-top: 0; padding-top: 0; }
-  .dot { width: 6px; height: 6px; margin-top: 6px; flex: none; background: var(--dim); }
-  .dot.urgent { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-  .dot.critical { background: var(--stop); box-shadow: 0 0 8px var(--stop); }
-  .notice .txt { flex: 1; font-size: 13px; }
+/* --- confirmation (live, from a REPL) ------------------------------------- */
+#confirm { border-color: rgba(251,191,36,.45); display: none; }
+#confirm > header h2 { color: var(--warn); }
+#confirm pre { margin: 0; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; }
 
-  #activity { font: 11px/1.7 var(--mono); color: var(--dim); }
-  #activity div { display: flex; gap: 9px; white-space: nowrap; }
-  #activity div:first-child { color: var(--accent); }
-  #activity .t { opacity: .55; }
-  #activity .n { overflow: hidden; text-overflow: ellipsis; }
-  .muted { color: var(--dim); font-size: 12px; margin: 0; }
-
-  /* Work: jobs, approvals, schedules. One row shape, three uses. */
-  .row { display: flex; gap: 9px; align-items: flex-start; padding: 7px 0; border-top: 1px solid rgba(255,255,255,.06); }
-  .row:first-child { border-top: 0; padding-top: 0; }
-  .row .body { flex: 1; min-width: 0; }
-  .row .title { font-size: 13px; line-height: 1.35; }
-  .row .sub { font: 10px/1.5 var(--mono); letter-spacing: .08em; color: var(--dim); margin-top: 3px; text-transform: uppercase; }
-  .row .acts { display: flex; gap: 5px; flex-shrink: 0; }
-
-  /* A state badge that reads at a glance. Blocked work is the one thing on
-     this page that needs a person, so it is the one that gets a colour. */
-  .badge {
-    font: 9px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase;
-    padding: 4px 6px; border: 1px solid rgba(255,255,255,.16); border-radius: 3px;
-    color: var(--dim); white-space: nowrap; margin-top: 1px;
-  }
-  .badge.running { color: var(--accent); border-color: rgba(96,209,255,.5); }
-  .badge.waiting_approval { color: var(--stop); border-color: rgba(248,113,113,.55); background: rgba(248,113,113,.1); }
-  .badge.done { color: var(--go); border-color: rgba(74,222,128,.4); }
-  .badge.failed { color: var(--stop); border-color: rgba(248,113,113,.4); }
-  .badge.paused { opacity: .55; }
-
-  /* The blocked-work panel announces itself — it is the only panel on the
-     page that means "nothing moves until you look at this". */
-  /* Flex rather than a grid row, because this one appears and disappears —
-     a template row sized for a panel that isn't there is a gap, and a panel
-     past the end of the template overflows the column. */
-  .middle > .core-panel { flex: 1 1 auto; min-height: 200px; }
-  .middle > #blocked-panel { flex: 0 0 auto; max-height: 42%; }
-  .middle > #conversation-panel { flex: 0 1 38%; min-height: 120px; }
-
-  #blocked-panel { border-color: rgba(248,113,113,.45); }
-  #blocked-panel .p-head h2 { color: var(--stop); }
-  #blocked .title { font-size: 13.5px; }
-  #blocked .wants { margin-top: 5px; padding: 7px 9px; border-left: 2px solid rgba(248,113,113,.5);
-                    background: rgba(248,113,113,.07); font-size: 12.5px; line-height: 1.45; }
-
-  /* --- boot ---------------------------------------------------------------- */
-  .boot {
-    position: fixed; inset: 0; z-index: 9; background: var(--bg); display: grid; place-items: center;
-    animation: boot-out .5s ease 1.05s forwards; pointer-events: none;
-  }
-  @keyframes boot-out { to { opacity: 0; visibility: hidden; } }
-  .boot b { font: 700 20px/1 ui-rounded, system-ui, sans-serif; letter-spacing: .5em; color: var(--accent); }
-  .boot .load { width: 190px; height: 2px; margin-top: 16px; background: rgba(255, 255, 255, .1); overflow: hidden; }
-  .boot .load::after { content: ""; display: block; height: 100%; width: 0; background: var(--accent); animation: load 1s ease-out forwards; }
-  @keyframes load { to { width: 100%; } }
-
-  /* --- narrow screens: stop pretending it's a wall ------------------------- */
-  @media (max-width: 1150px), (max-height: 620px) {
-    body { overflow: auto; }
-    .deck {
-      height: auto; min-height: 100%;
-      grid-template-columns: 1fr; grid-template-rows: auto;
-      grid-template-areas: "top" "core" "left" "right" "foot";
-    }
-    .middle > .core-panel,
-    .middle > #blocked-panel,
-    .middle > #conversation-panel { flex: none; max-height: none; }
-    .rail.left, .rail.right { grid-template-rows: none; grid-auto-rows: auto; }
-    .core-panel { min-height: 400px; }
-    .p-body { max-height: 340px; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-      animation-duration: .001s !important; animation-iteration-count: 1 !important;
-      transition-duration: .001s !important;
-    }
-  }
+@media (max-width: 1180px) {
+  .app { grid-template-columns: 1fr; height: auto; }
+  .side, .aside { border: 0; border-bottom: 1px solid var(--line); }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+}
 </style>
 </head>
 <body data-state="idle">
+<div class="app">
 
-<div class="room">
-  <div class="wash"></div>
-  <div class="floor"></div>
-  <div class="scan"></div>
-  <div class="vignette"></div>
-</div>
+  <!-- sidebar ------------------------------------------------------------- -->
+  <aside class="side">
+    <div class="brand">
+      <div class="glyph">A</div>
+      <div><b>Ada</b><span id="v-catalogue">&mdash; tools</span></div>
+    </div>
 
-<div class="boot"><div><b>ADA</b><div class="load"></div></div></div>
+    <nav class="nav">
+      <a class="on" href="#"><i></i>Dashboard</a>
+    </nav>
 
-<div class="deck">
+    <div class="sidecard">
+      <div class="statechip"><span class="pulse"></span><span id="v-state">idle</span><small id="v-uptime">0:00</small></div>
+      <div id="v-substate" class="cap"></div>
+    </div>
 
-  <div class="strip top">
-    <span class="mark"><b>Ada</b><span>//</span></span>
-    <span class="live"><i></i><span id="top-state">idle</span></span>
-    <span class="spacer"></span>
-    <span id="top-armed">tools &mdash;</span>
-    <span id="top-spend">spend &mdash;</span>
-    <span id="top-clock">--:--:--</span>
-  </div>
+    <div class="sidecard">
+      <div class="kv"><span class="k">Heartbeat</span><span class="v"><button class="ghost" id="heartbeat-toggle">&hellip;</button></span></div>
+      <div class="kv"><span class="k">History</span><span class="v" id="v-messages">&mdash;</span></div>
+      <div class="kv"><span class="k">Armed</span><span class="v" id="v-armed">0</span></div>
+      <div class="kv"><span class="k">Today</span><span class="v" id="v-today">&mdash;</span></div>
+    </div>
 
-  <div class="rail left">
-    <section class="panel" style="--d:.05s">
-      <div class="p-head"><h2>System</h2><div class="hatch"></div></div>
-      <div class="p-body">
-        <div class="kv"><span class="k">State</span><span class="v hot" id="v-state">idle</span></div>
-        <div class="kv"><span class="k">Uptime</span><span class="v" id="v-uptime">0:00:00</span></div>
-        <div class="kv"><span class="k">History</span><span class="v" id="v-messages">&mdash;</span></div>
-        <div class="kv"><span class="k">Catalogue</span><span class="v" id="v-catalogue">&mdash;</span></div>
-        <div class="kv"><span class="k">Heartbeat</span><button class="tiny" id="heartbeat-toggle">&hellip;</button></div>
+    <div class="foot">Local only<br>127.0.0.1:4173<br>Nothing here leaves this machine</div>
+  </aside>
+
+  <!-- main ---------------------------------------------------------------- -->
+  <main class="main">
+    <div class="stats">
+      <div class="stat" id="s-jobs"><div class="top"><span class="label">Jobs running</span><span class="mark"></span></div><div class="n">0</div><div class="sub">queued or in flight</div></div>
+      <div class="stat" id="s-blocked"><div class="top"><span class="label">Waiting on you</span><span class="mark"></span></div><div class="n">0</div><div class="sub">nothing blocked</div></div>
+      <div class="stat" id="s-sched"><div class="top"><span class="label">Scheduled</span><span class="mark"></span></div><div class="n">0</div><div class="sub">recurring</div></div>
+      <div class="stat" id="s-spend"><div class="top"><span class="label">Spent today</span><span class="mark"></span></div><div class="n">&mdash;</div><div class="sub">against the daily cap</div></div>
+    </div>
+
+    <section class="card" id="confirm">
+      <header><h2>Confirm</h2><span class="count">from the terminal</span></header>
+      <div class="body">
+        <pre id="confirm-text"></pre>
+        <div class="ask acts" style="border:0;background:none;padding:0;margin-top:11px">
+          <button class="go" id="approve">Approve</button>
+          <button class="stop" id="decline">Decline</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="blocked" style="display:none">
+      <header><h2>Waiting on you</h2><span class="count" id="v-blocked">0</span></header>
+      <div class="body" id="blocked-body"></div>
+    </section>
+
+    <section class="card">
+      <header><h2>Jobs</h2><span class="count" id="v-jobs">0 open</span></header>
+      <div class="body scroll" id="jobs"><p class="empty">Nothing queued.</p></div>
+    </section>
+
+    <section class="card">
+      <header><h2>Conversation</h2><span class="count" id="v-turns">0 turns</span></header>
+      <div class="body scroll" id="chat-body"><div id="chat"><p class="empty">Say &ldquo;Ada&rdquo; to start, or type in the terminal.</p></div></div>
+    </section>
+  </main>
+
+  <!-- right --------------------------------------------------------------- -->
+  <aside class="aside">
+    <section class="card">
+      <header>
+        <h2>Model usage</h2>
+        <div class="pills" id="range">
+          <button data-days="7">7D</button>
+          <button data-days="30" class="on">30D</button>
+        </div>
+      </header>
+      <div class="body">
+        <div class="headline"><span class="n" id="u-total">&mdash;</span><span class="delta flat" id="u-delta">&mdash;</span></div>
+        <div class="cap" id="u-cap">&nbsp;</div>
+        <div class="chart" id="u-chart"></div>
+        <div class="axis"><span id="u-from"></span><span id="u-to"></span></div>
+        <div class="tiles">
+          <div class="tile"><div class="l">Today</div><div class="v" id="u-today">&mdash;</div></div>
+          <div class="tile"><div class="l">Avg / day</div><div class="v" id="u-avg">&mdash;</div></div>
+          <div class="tile"><div class="l">Busiest</div><div class="v" id="u-peak">&mdash;</div></div>
+          <div class="tile"><div class="l">Active days</div><div class="v" id="u-active">&mdash;</div></div>
+        </div>
+        <div id="u-gauges"></div>
       </div>
     </section>
 
-    <section class="panel" style="--d:.12s">
-      <div class="p-head"><h2>Expenditure</h2><div class="hatch"></div><span class="meta" id="v-tokens">&mdash;</span></div>
-      <div class="p-body" id="spend"><p class="muted">No limits configured.</p></div>
+    <section class="card">
+      <header><h2>Scheduled</h2><span class="count" id="v-sched">0</span></header>
+      <div class="body scroll" id="schedules"><p class="empty">Nothing recurring.</p></div>
     </section>
 
-    <section class="panel" style="--d:.19s">
-      <div class="p-head"><h2>Armed</h2><div class="hatch"></div><span class="meta" id="v-armed-count">0</span></div>
-      <div class="p-body"><div class="chips" id="armed"><p class="muted">Nothing routed yet.</p></div></div>
-    </section>
-  </div>
-
-  <div class="middle">
-    <section class="panel core-panel">
-      <div class="stage">
-        <div class="halo"></div>
-
-        <svg class="rings" viewBox="0 0 320 320" aria-hidden="true">
-          <g class="spin-slow" style="transform-origin:160px 160px">
-            <circle cx="160" cy="160" r="150" stroke-width="7" stroke-dasharray="1 8" opacity=".55"/>
-          </g>
-          <circle cx="160" cy="160" r="138" stroke-width="1" opacity=".22"/>
-          <g class="spin-back" style="transform-origin:160px 160px">
-            <circle cx="160" cy="160" r="126" stroke-width="1.5" stroke-dasharray="64 22 9 22" opacity=".65"/>
-          </g>
-          <g class="spin-fast" style="transform-origin:160px 160px">
-            <path d="M160 62 A98 98 0 0 1 229 91" stroke-width="2.5" opacity=".85"/>
-            <path d="M160 258 A98 98 0 0 1 91 229" stroke-width="2.5" opacity=".85"/>
-          </g>
-          <circle cx="160" cy="160" r="84" stroke-width="1" opacity=".18"/>
-          <g class="spin-back" style="transform-origin:160px 160px">
-            <polygon points="160,96 215,128 215,192 160,224 105,192 105,128" stroke-width="1" opacity=".3"/>
-          </g>
-          <g opacity=".5">
-            <line x1="160" y1="6" x2="160" y2="20" stroke-width="1.5"/>
-            <line x1="160" y1="300" x2="160" y2="314" stroke-width="1.5"/>
-            <line x1="6" y1="160" x2="20" y2="160" stroke-width="1.5"/>
-            <line x1="300" y1="160" x2="314" y2="160" stroke-width="1.5"/>
-          </g>
-        </svg>
-
-        <div class="sonar"></div><div class="sonar"></div><div class="sonar"></div>
-        <div class="orb"></div>
-        <div class="wave" id="wave"></div>
-
-        <div class="readout">
-          <div class="state" id="state-label">idle</div>
-          <div class="sub" id="state-sub">standing by</div>
-        </div>
-      </div>
-
-      <section class="panel" id="confirm">
-        <div class="p-head"><h2 style="color:var(--stop)">Confirm</h2><div class="hatch"></div><span class="meta">Y / N</span></div>
-        <div class="p-body">
-          <pre id="confirm-text"></pre>
-          <div class="buttons">
-            <button class="go" id="approve">Approve</button>
-            <button class="stop" id="decline">Decline</button>
-          </div>
-          <p class="muted" style="margin-top:14px">Or answer in the terminal &mdash; whichever comes first.</p>
-        </div>
-      </section>
+    <section class="card">
+      <header><h2>Noticed</h2><span class="count" id="v-notices">0</span></header>
+      <div class="body scroll" id="notices"><p class="empty">Nothing to report.</p></div>
     </section>
 
-    <section class="panel" id="blocked-panel" style="--d:.06s; display:none">
-      <div class="p-head"><h2>Waiting on you</h2><div class="hatch"></div><span class="meta" id="v-blocked">0</span></div>
-      <div class="p-body" id="blocked"></div>
+    <section class="card">
+      <header><h2>Activity</h2></header>
+      <div class="body scroll log" id="activity"></div>
     </section>
-
-    <section class="panel" id="conversation-panel" style="--d:.09s">
-      <div class="p-head"><h2>Conversation</h2><div class="hatch"></div><span class="meta" id="v-turns">0 turns</span></div>
-      <div class="p-body"><div id="chat"><div class="empty">Say &ldquo;Ada&rdquo; to start, or type in the terminal.</div></div></div>
-    </section>
-  </div>
-
-  <div class="rail right">
-    <section class="panel" style="--d:.17s">
-      <div class="p-head"><h2>Jobs</h2><div class="hatch"></div><span class="meta" id="v-jobs">0</span></div>
-      <div class="p-body" id="jobs"><p class="muted">Nothing queued.</p></div>
-    </section>
-
-    <section class="panel" style="--d:.21s">
-      <div class="p-head"><h2>Scheduled</h2><div class="hatch"></div><span class="meta" id="v-schedules">0</span></div>
-      <div class="p-body" id="schedules"><p class="muted">Nothing recurring.</p></div>
-    </section>
-
-    <section class="panel" style="--d:.16s">
-      <div class="p-head"><h2>Noticed</h2><div class="hatch"></div><span class="meta" id="v-notices">0</span></div>
-      <div class="p-body" id="notices"><p class="muted">Nothing to report.</p></div>
-    </section>
-
-    <section class="panel" style="--d:.23s">
-      <div class="p-head"><h2>Activity</h2><div class="hatch"></div></div>
-      <div class="p-body" id="activity"></div>
-    </section>
-  </div>
-
-  <div class="strip foot">
-    <span>Local only</span><span>&middot;</span><span>127.0.0.1:4173</span>
-    <span class="spacer"></span>
-    <span>Nothing here leaves this machine</span>
-  </div>
-
+  </aside>
 </div>
 
 <script>
@@ -578,11 +330,9 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => (
   {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-let pendingId = null;
-// Re-rendering a panel that hasn't changed throws away its DOM every four
-// seconds. For a list of text that's merely wasteful; for the approve/refuse
-// buttons it means a click can land on an element that no longer exists.
-// Same guard the chat and armed panels already use.
+// Re-rendering a panel that hasn't changed throws away its DOM on every poll.
+// For text that's merely wasteful; for the approve/refuse buttons it means a
+// click can land on an element that no longer exists.
 const lastRender = {};
 function changed(key, data) {
   const next = JSON.stringify(data);
@@ -590,203 +340,154 @@ function changed(key, data) {
   lastRender[key] = next;
   return true;
 }
-let lastChat = "";
-let lastArmed = "";
-let runningTool = null;
+
+let pendingId = null;
+let hasLiveChat = false;
+let rangeDays = 30;
 
 async function get(url) {
   try { const r = await fetch(url); return r.ok ? await r.json() : null; }
   catch { return null; }
 }
 
-// The waveform is 36 spokes around the core, built once here rather than
-// written out 36 times in the markup.
-$("wave").innerHTML = Array.from({length: 36}, (_, i) => `<i style="--i:${i}"></i>`).join("");
+const money = (n) => n == null ? "—" : (n < 1 && n > 0 ? "$" + n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : "$" + n.toFixed(2));
 
-function renderState(snap) {
-  const state = snap.state || "idle";
-  document.body.dataset.state = state;
-  $("state-label").textContent = state;
-  $("top-state").textContent = state;
-  $("v-state").textContent = state;
-  runningTool = snap.tool || null;
-  // The raw status is only worth a second line when it says more than the
-  // state already does — "speaking..." under SPEAKING is noise, and the
-  // trailing dots the REPLs write mean this can't be a plain comparison.
-  // When there's nothing to add the line goes empty rather than falling back
-  // to "standing by", which is only true of idle and read as a flat
-  // contradiction under SPEAKING.
-  const detail = (snap.status || "").trim();
-  const echoes = detail.toLowerCase().replace(/[^a-z]/g, "") === state;
-  $("state-sub").textContent = snap.tool
-    ? `running ${snap.tool}`
-    : (detail && !echoes ? detail : (state === "idle" ? "standing by" : ""));
+function ago(ts) {
+  if (!ts) return "";
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+function when(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const today = new Date().toDateString() === d.toDateString();
+  const t = d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  return today ? t : d.toLocaleDateString([], {weekday: "short", day: "numeric", month: "short"}) + " " + t;
 }
 
-// Whether this page is attached to a process that's actually talking. The
-// face served by the always-on daemon isn't — status.py is process memory —
-// so the chat panel falls back to what's on disk rather than looking dead.
-let hasLiveChat = false;
+/* --- live state --------------------------------------------------------- */
+async function refreshStatus() {
+  const snap = await get("/api/status");
+  if (!snap) return;
 
+  const state = snap.state || "idle";
+  document.body.dataset.state = state;
+  $("v-state").textContent = state;
+  $("v-substate").textContent = snap.status && snap.status !== state ? snap.status : "";
+
+  const turns = snap.transcript || [];
+  hasLiveChat = turns.length > 0;
+  if (hasLiveChat) renderChat(turns, true);
+
+  // A confirmation is a *live* thing: it belongs to a terminal that is sitting
+  // in a blocking read right now. Whoever answers first wins — see ada/confirm.py.
+  const p = snap.pending;
+  $("confirm").style.display = p ? "" : "none";
+  if (p) {
+    pendingId = p.id;
+    if (changed("confirm", p)) $("confirm-text").textContent = p.description;
+  } else {
+    pendingId = null;
+  }
+}
+
+$("approve").onclick = () => answer(true);
+$("decline").onclick = () => answer(false);
+async function answer(approved) {
+  if (pendingId == null) return;
+  const id = pendingId;
+  pendingId = null;
+  $("confirm").style.display = "none";
+  await fetch("/api/confirm", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({id, approved}),
+  });
+}
+
+let lastChat = "";
 function renderChat(turns, live = true) {
-  // Cheap identity check: re-rendering every poll would fight text selection
-  // and reset scroll while you're reading.
   const key = JSON.stringify([turns, live]);
   if (key === lastChat) return;
   lastChat = key;
 
-  const chat = $("chat");
   $("v-turns").textContent =
-    `${turns.length} turn${turns.length === 1 ? "" : "s"}${live || !turns.length ? "" : " \u00b7 from disk"}`;
+    `${turns.length} turn${turns.length === 1 ? "" : "s"}${live || !turns.length ? "" : " · from disk"}`;
+  const chat = $("chat");
   if (!turns.length) {
-    chat.innerHTML = '<div class="empty">Say &ldquo;Ada&rdquo; to start, or type in the terminal.</div>';
+    chat.innerHTML = '<p class="empty">Say &ldquo;Ada&rdquo; to start, or type in the terminal.</p>';
     return;
   }
-  // The scroller is the panel body now, not #chat itself.
-  const box = chat.parentElement;
+  const box = $("chat-body");
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 70;
   chat.innerHTML = turns.map(t => `
     <div class="turn ${t.role === "ada" ? "ada" : "you"}">
-      <div class="tick"></div>
       <div class="who">${t.role === "ada" ? "ada" : "you"}</div>
       <div class="said ${t.streaming ? "cursor" : ""}">${esc(t.text)}</div>
     </div>`).join("");
   if (nearBottom) box.scrollTop = box.scrollHeight;
 }
 
-function renderConfirm(p) {
-  const box = $("confirm");
-  if (!p) { box.classList.remove("show"); pendingId = null; return; }
-  pendingId = p.id;
-  $("confirm-text").textContent = p.description;
-  box.classList.add("show");
+// Only when nothing live is running: this reads session.json off disk, which
+// is exactly what the slow clock exists to keep off the 400ms poll.
+async function refreshConversation() {
+  if (hasLiveChat) return;
+  const data = await get("/api/conversation");
+  if (data) renderChat(data.turns, data.live);
 }
 
-async function answer(approved) {
-  if (pendingId === null) return;
-  const id = pendingId;
-  pendingId = null;
-  $("confirm").classList.remove("show");   // respond instantly; the poll confirms
-  await fetch("/api/confirm", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({id, approved})
-  });
-}
-$("approve").onclick = () => answer(true);
-$("decline").onclick = () => answer(false);
-document.addEventListener("keydown", (e) => {
-  if (pendingId === null) return;
-  const k = e.key.toLowerCase();
-  if (k === "y") answer(true);
-  if (k === "n" || e.key === "Escape") answer(false);
-});
+/* --- work ---------------------------------------------------------------- */
+const JOB_ICON = {pending: "◷", running: "◐", waiting_approval: "!", done: "✓", failed: "×", cancelled: "×"};
 
-async function refreshStatus() {
-  const snap = await get("/api/status");
-  if (!snap) {
-    $("state-label").textContent = "offline";
-    $("state-sub").textContent = "ada isn't running";
-    return;
-  }
-  renderState(snap);
-  hasLiveChat = (snap.transcript || []).length > 0;
-  if (hasLiveChat) renderChat(snap.transcript, true);
-  renderConfirm(snap.pending);
-}
+async function refreshJobs() {
+  const data = await get("/api/jobs");
+  if (!data) return;
+  const rows = [...data.open, ...data.closed];
+  $("v-jobs").textContent = `${data.open.length} open`;
+  setStat("s-jobs", data.open.length, data.open.length ? "queued or in flight" : "nothing queued", data.open.length > 0);
+  if (!changed("jobs", rows)) return;
 
-// --- the slower numbers -----------------------------------------------------
-
-function clock(seconds) {
-  const s = Math.max(0, Math.floor(seconds));
-  const mm = String(Math.floor(s / 60) % 60).padStart(2, "0");
-  const ss = String(s % 60).padStart(2, "0");
-  return `${Math.floor(s / 3600)}:${mm}:${ss}`;
-}
-
-function renderSpend(gauges, tokens) {
-  // The cached count only appears once there is one — on a cold session it
-  // would just be a zero taking up room, and it's the one number here that
-  // says whether the prompt cache is actually being hit.
-  const cached = tokens.cached || 0;
-  $("v-tokens").textContent =
-    `${(tokens.input || 0).toLocaleString()} in / ${(tokens.output || 0).toLocaleString()} out`
-    + (cached ? ` · ${cached.toLocaleString()} cached` : "");
-
-  if (!gauges.length) {
-    $("spend").innerHTML = '<p class="muted">No limits configured.</p>';
-    $("top-spend").textContent = "spend —";
-    return;
-  }
-  $("spend").innerHTML = gauges.map(g => {
-    // A zero cap is a real setting — purchases default to it — so it's full,
-    // not a divide by zero. Anything spent against a zero cap is already over.
-    const pct = g.cap > 0 ? Math.min(100, (g.used / g.cap) * 100) : (g.used > 0 ? 100 : 0);
+  $("jobs").innerHTML = rows.length ? rows.map(j => {
+    const bits = [];
+    if (j.spent) bits.push(money(j.spent) + (j.budget ? ` / ${money(j.budget)}` : ""));
+    if (j.tools) bits.push(`${j.tools.length} tool${j.tools.length === 1 ? "" : "s"}`);
+    if (j.attempts > 1) bits.push(`attempt ${j.attempts}`);
+    const note = j.state === "done" ? j.result : (j.state === "failed" ? j.error : "");
     return `
-      <div class="gauge">
-        <div class="g-top">
-          <span>${esc(g.category)} &middot; ${esc(g.window)}</span>
-          <span>${esc(g.used_text)} / ${esc(g.cap_text)}</span>
+      <div class="row">
+        <div class="icon">${JOB_ICON[j.state] || "·"}</div>
+        <div class="body">
+          <div class="t">${esc(j.task)}</div>
+          ${note ? `<div class="m">${esc(String(note).slice(0, 90))}</div>` : ""}
+          ${bits.length ? `<div class="m">${esc(bits.join("  ·  "))}</div>` : ""}
         </div>
-        <div class="g-track"><i class="${pct >= 90 ? "over" : ""}" style="width:${pct.toFixed(1)}%"></i></div>
+        <div class="right">
+          <span class="tag ${esc(j.state)}">${esc(j.state.replace("_", " "))}</span>
+          <div class="ago">${esc(ago(j.at))}</div>
+        </div>
       </div>`;
-  }).join("");
-
-  const headline = gauges.find(g => g.category === "model" && g.window === "day") || gauges[0];
-  $("top-spend").textContent = `${headline.category} ${headline.used_text}/${headline.cap_text}`;
+  }).join("") : '<p class="empty">Nothing queued.</p>';
 }
 
-function renderArmed(names) {
-  // Re-rendered only when the set or the running tool changes, so the chips
-  // don't flicker on every poll.
-  const key = JSON.stringify([names, runningTool]);
-  if (key === lastArmed) return;
-  lastArmed = key;
-
-  $("v-armed-count").textContent = names.length;
-  $("armed").innerHTML = names.length
-    ? names.map(n => `<span class="chip ${n === runningTool ? "running" : ""}">${esc(n)}</span>`).join("")
-    : '<p class="muted">Nothing routed yet.</p>';
-}
-
-async function refreshVitals() {
-  const v = await get("/api/vitals");
-  if (!v) return;
-  $("v-uptime").textContent = clock(v.uptime);
-  $("v-messages").textContent = `${v.messages} msg`;
-  $("v-catalogue").textContent = `${v.catalogue} tools`;
-  $("top-armed").textContent = `tools ${(v.armed || []).length}/${v.catalogue}`;
-  renderSpend(v.spend || [], v.tokens || {});
-  renderArmed(v.armed || []);
-}
-
-function when(ts) {
-  if (!ts) return "";
-  const d = new Date(ts * 1000);
-  const today = new Date().toDateString() === d.toDateString();
-  return today ? d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})
-               : d.toLocaleDateString([], {weekday: "short", day: "numeric", month: "short"})
-                 + " " + d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
-}
-
-// Blocked work is the only thing here that stops until a person looks at it,
-// so the panel hides entirely when there is none rather than sitting empty.
+// The only thing on this page that means "nothing moves until you look at it",
+// so the card hides entirely when there is none rather than sitting empty.
 async function refreshBlocked() {
   const list = await get("/api/approvals");
   if (!list) return;
-  $("blocked-panel").style.display = list.length ? "" : "none";
+  $("blocked").style.display = list.length ? "" : "none";
   $("v-blocked").textContent = list.length;
+  setStat("s-blocked", list.length, list.length ? "needs a decision" : "nothing blocked", false, list.length > 0);
   if (!changed("blocked", list)) return;
-  $("blocked").innerHTML = list.map(a => `
-    <div class="row">
-      <div class="body">
-        <div class="title">Job #${a.id} &mdash; ${esc(a.task)}</div>
-        <div class="wants">${esc(a.wants)}</div>
-        <div class="sub">asked ${esc(when(a.asked_at))}</div>
-      </div>
+
+  $("blocked-body").innerHTML = list.map(a => `
+    <div class="ask">
+      <div class="who">Job #${a.id} &middot; ${esc(a.task)} &middot; ${esc(ago(a.asked_at))}</div>
+      <div class="what">${esc(a.wants)}</div>
       <div class="acts">
-        <button class="tiny go" onclick="resolve(${a.id}, 'approve')">Approve</button>
-        <button class="tiny stop" onclick="resolve(${a.id}, 'deny')">Refuse</button>
+        <button class="go" onclick="resolve(${a.id}, 'approve')">Approve</button>
+        <button class="stop" onclick="resolve(${a.id}, 'deny')">Refuse</button>
       </div>
     </div>`).join("");
 }
@@ -796,70 +497,140 @@ async function resolve(id, decision) {
   refreshBlocked(); refreshJobs(); refreshNotices();
 }
 
-async function refreshJobs() {
-  const data = await get("/api/jobs");
-  if (!data) return;
-  const rows = [...data.open, ...data.closed];
-  $("v-jobs").textContent = data.open.length;
-  if (!changed("jobs", rows)) return;
-  $("jobs").innerHTML = rows.length
-    ? rows.map(j => {
-        const bits = [];
-        if (j.spent) bits.push(`$${j.spent.toFixed(4)}${j.budget ? ` / $${j.budget}` : ""}`);
-        if (j.tools) bits.push(`${j.tools.length} tool${j.tools.length === 1 ? "" : "s"}`);
-        if (j.attempts > 1) bits.push(`attempt ${j.attempts}`);
-        return `
-        <div class="row">
-          <span class="badge ${esc(j.state)}">${esc(j.state.replace("_", " "))}</span>
-          <div class="body">
-            <div class="title">${esc(j.task)}</div>
-            ${bits.length ? `<div class="sub">${esc(bits.join("  \u00b7  "))}</div>` : ""}
-          </div>
-        </div>`;
-      }).join("")
-    : '<p class="muted">Nothing queued.</p>';
-}
-
 async function refreshSchedules() {
   const list = await get("/api/schedules");
   if (!list) return;
-  $("v-schedules").textContent = list.filter(s => s.enabled).length;
+  const on = list.filter(s => s.enabled).length;
+  $("v-sched").textContent = on;
+  setStat("s-sched", on, on ? "recurring" : "nothing recurring", false);
   if (!changed("schedules", list)) return;
-  $("schedules").innerHTML = list.length
-    ? list.map(s => `
-        <div class="row">
-          <span class="badge ${s.enabled ? "" : "paused"}">${s.enabled ? "on" : "paused"}</span>
-          <div class="body">
-            <div class="title">${esc(s.task)}</div>
-            <div class="sub">${esc(s.rhythm)}${s.enabled && s.next_due_at ? "  \u00b7  next " + esc(when(s.next_due_at)) : ""}${s.runs ? "  \u00b7  run " + s.runs + "x" : ""}</div>
-          </div>
-        </div>`).join("")
-    : '<p class="muted">Nothing recurring.</p>';
+
+  $("schedules").innerHTML = list.length ? list.map(s => `
+    <div class="row">
+      <div class="icon">${s.enabled ? "↻" : "‖"}</div>
+      <div class="body">
+        <div class="t">${esc(s.task)}</div>
+        <div class="m">${esc(s.rhythm)}${s.runs ? `  ·  ${s.runs} run${s.runs === 1 ? "" : "s"}` : ""}</div>
+      </div>
+      <div class="right">
+        <span class="tag ${s.enabled ? "" : "off"}">${s.enabled ? "on" : "paused"}</span>
+        <div class="ago">${s.enabled && s.next_due_at ? esc(when(s.next_due_at)) : ""}</div>
+      </div>
+    </div>`).join("") : '<p class="empty">Nothing recurring.</p>';
 }
 
-// On the slow clock, and only when nothing live is running: this reads
-// session.json off disk, which is exactly what /api/vitals was split out to
-// keep off the 400ms poll.
-async function refreshConversation() {
-  if (hasLiveChat) return;
-  const data = await get("/api/conversation");
-  if (!data) return;
-  renderChat(data.turns, data.live);
+function setStat(id, n, sub, hot = false, alert = false) {
+  const el = $(id);
+  el.querySelector(".n").textContent = n;
+  el.querySelector(".sub").textContent = sub;
+  el.classList.toggle("hot", !!hot);
+  el.classList.toggle("alert", !!alert);
 }
 
+/* --- usage --------------------------------------------------------------- */
+// An inline SVG area chart, because the alternative is a CDN this page can't
+// reach and a build step this project doesn't have.
+function areaChart(points) {
+  const W = 340, H = 92, pad = 2;
+  if (!points.length) return "";
+  const max = Math.max(...points.map(p => p.amount), 0.0001);
+  const step = points.length > 1 ? (W - pad * 2) / (points.length - 1) : 0;
+  const xy = points.map((p, i) => [pad + i * step, H - pad - (p.amount / max) * (H - pad * 2 - 6)]);
+  const line = xy.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join("");
+  const area = `${line}L${xy[xy.length - 1][0].toFixed(1)},${H}L${xy[0][0].toFixed(1)},${H}Z`;
+  const last = xy[xy.length - 1];
+  return `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#f97316" stop-opacity=".38"/>
+        <stop offset="100%" stop-color="#f97316" stop-opacity="0"/>
+      </linearGradient></defs>
+      <path d="${area}" fill="url(#g)"/>
+      <path d="${line}" fill="none" stroke="#f97316" stroke-width="1.75" stroke-linejoin="round"/>
+      <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.6" fill="#f97316"/>
+    </svg>`;
+}
+
+async function refreshUsage() {
+  const u = await get(`/api/usage?days=${rangeDays}`);
+  if (!u) return;
+
+  const s = u.series;
+  const active = s.filter(p => p.amount > 0);
+  const peak = s.reduce((a, p) => (p.amount > a.amount ? p : a), {amount: 0, at: 0});
+
+  $("u-total").textContent = money(u.total);
+  $("u-today").textContent = money(u.today);
+  // Averaged over the days Ada was actually used, not the whole window — a
+  // month of zeroes divided into a busy week is a number about nothing.
+  $("u-avg").textContent = active.length ? money(u.total / active.length) : "—";
+  $("u-peak").textContent = peak.amount ? money(peak.amount) : "—";
+  $("u-active").textContent = `${active.length}/${s.length}`;
+  $("v-today").textContent = money(u.today);
+
+  const cap = (u.gauges || []).find(g => g.category === "model" && g.window === "day");
+  if (cap) {
+    setStat("s-spend", money(u.today), `of ${cap.cap_text} today`, u.today > 0, u.today >= cap.cap);
+  } else {
+    setStat("s-spend", money(u.today), "no daily cap set", u.today > 0);
+  }
+
+  // Second half against first half — a direction, not a forecast, and it says
+  // so in words rather than a percentage of nothing when the first half is 0.
+  const half = Math.floor(s.length / 2);
+  const older = s.slice(0, half).reduce((a, p) => a + p.amount, 0);
+  const newer = s.slice(half).reduce((a, p) => a + p.amount, 0);
+  const d = $("u-delta");
+  if (older > 0) {
+    const pct = ((newer - older) / older) * 100;
+    d.textContent = `${pct >= 0 ? "+" : ""}${pct.toFixed(0)}%`;
+    d.className = "delta " + (pct >= 0 ? "up" : "flat");
+  } else {
+    d.textContent = newer > 0 ? "new" : "no spend";
+    d.className = "delta flat";
+  }
+  $("u-cap").textContent = `across ${s.length} days`;
+
+  if (changed("chart", s)) {
+    $("u-chart").innerHTML = areaChart(s);
+    $("u-from").textContent = s.length ? new Date(s[0].at * 1000).toLocaleDateString([], {day: "numeric", month: "short"}) : "";
+    $("u-to").textContent = "today";
+  }
+
+  if (changed("gauges", u.gauges)) {
+    $("u-gauges").innerHTML = (u.gauges || []).map(g => {
+      const pct = g.cap > 0 ? Math.min(100, (g.used / g.cap) * 100) : 0;
+      return `
+        <div class="gauge ${g.used >= g.cap && g.cap > 0 ? "over" : ""}">
+          <div class="line"><span class="k">${esc(g.category)} · ${esc(g.window)}</span><span class="v">${esc(g.used_text)} / ${esc(g.cap_text)}</span></div>
+          <div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+        </div>`;
+    }).join("");
+  }
+}
+
+$("range").querySelectorAll("button").forEach(b => {
+  b.onclick = () => {
+    rangeDays = Number(b.dataset.days);
+    $("range").querySelectorAll("button").forEach(o => o.classList.toggle("on", o === b));
+    delete lastRender.chart;
+    refreshUsage();
+  };
+});
+
+/* --- notices, heartbeat, activity ---------------------------------------- */
 async function refreshNotices() {
   const list = await get("/api/notices");
   if (!list) return;
   $("v-notices").textContent = list.length;
   if (!changed("notices", list)) return;
-  $("notices").innerHTML = list.length
-    ? list.map(n => `
-        <div class="notice">
-          <span class="dot ${esc(n.level)}"></span>
-          <span class="txt">${esc(n.text)}</span>
-          ${n.check === "approvals" ? "" : `<button class="tiny" onclick="dismiss(${n.id})">clear</button>`}
-        </div>`).join("")
-    : '<p class="muted">Nothing to report.</p>';
+
+  $("notices").innerHTML = list.length ? list.map(n => `
+    <div class="row">
+      <div class="icon">${n.level === "normal" ? "·" : "!"}</div>
+      <div class="body"><div class="t">${esc(n.text)}</div><div class="m">${esc(ago(n.created_at))}</div></div>
+      ${n.check === "approvals" ? "" : `<div class="right"><button class="ghost" onclick="dismiss(${n.id})">Clear</button></div>`}
+    </div>`).join("") : '<p class="empty">Nothing to report.</p>';
 }
 async function dismiss(id) {
   await fetch(`/api/notices/${id}/dismiss`, {method: "POST"});
@@ -871,7 +642,7 @@ async function refreshHeartbeat() {
   const hb = await get("/api/heartbeat");
   if (!hb) return;
   const b = $("heartbeat-toggle");
-  b.textContent = hb.paused ? "paused" : "watching";
+  b.textContent = hb.paused ? "Paused" : "Watching";
   b.onclick = async () => {
     await fetch(`/api/heartbeat/${hb.paused ? "resume" : "pause"}`, {method: "POST"});
     refreshHeartbeat();
@@ -880,24 +651,29 @@ async function refreshHeartbeat() {
 
 async function refreshActivity() {
   const rows = await get("/api/activity");
-  if (!rows) return;
-  $("activity").innerHTML = rows.map(r => {
-    const t = new Date((r.time || 0) * 1000).toLocaleTimeString();
-    return `<div><span class="t">${esc(t)}</span><span class="n">${esc(r.tool || r.event || "")}</span></div>`;
-  }).join("");
+  if (!rows || !changed("activity", rows)) return;
+  $("activity").innerHTML = rows.map(r => `
+    <div><span class="t">${esc(new Date((r.time || 0) * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}))}</span>
+    <span class="n">${esc(r.tool || r.event || "")}</span></div>`).join("");
 }
 
-function tick() { $("top-clock").textContent = new Date().toLocaleTimeString(); }
+async function refreshVitals() {
+  const v = await get("/api/vitals");
+  if (!v) return;
+  $("v-catalogue").textContent = `${v.catalogue} tools`;
+  $("v-messages").textContent = `${v.messages} msg`;
+  $("v-armed").textContent = (v.armed || []).length;
+  const s = Math.floor(v.uptime || 0);
+  $("v-uptime").textContent = `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}`;
+}
 
-// Status is what the core rides on, so it's polled hard. Money, tools and
-// history move once a turn at most, and one of them reads a file — they get
-// their own slower clock.
+// Live state animates, so it's polled hard. Everything else moves once a turn
+// at most and some of it reads files — those share a slower clock.
 refreshStatus(); setInterval(refreshStatus, 400);
-tick(); setInterval(tick, 1000);
 refreshVitals(); setInterval(refreshVitals, 2500);
 function slow() {
-  refreshNotices(); refreshHeartbeat(); refreshActivity();
-  refreshBlocked(); refreshJobs(); refreshSchedules(); refreshConversation();
+  refreshJobs(); refreshBlocked(); refreshSchedules(); refreshNotices();
+  refreshHeartbeat(); refreshActivity(); refreshUsage(); refreshConversation();
 }
 slow(); setInterval(slow, 4000);
 </script>
