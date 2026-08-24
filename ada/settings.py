@@ -130,6 +130,10 @@ DEFAULTS: dict[str, Any] = {
             "compose_email": {"per_minute": 3, "per_hour": 10, "per_day": 30},
             # Tighter than the sends: money doesn't come back.
             "make_purchase": {"per_minute": 1, "per_hour": 5, "per_day": 10},
+            # Not a safety rail either — a job record is inert. This is the
+            # backstop against a model in a loop queueing work until the disk
+            # fills, which is a real failure mode for a tool that always succeeds.
+            "start_job": {"per_minute": 5, "per_hour": 30, "per_day": 100},
         },
     },
     "purchasing": {

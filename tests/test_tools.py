@@ -94,3 +94,77 @@ def test_note_search_reports_file_and_line():
 
     assert "ideas.md:2" in result
     assert notes.search_notes("nothing here at all").startswith("No matches")
+
+
+# --- the capability table in AGENT.md ---------------------------------------
+#
+# AGENT.md is the single source of truth and its table is the first thing
+# anyone reads. It claimed to be generated from the registry and asserted
+# against it; it was neither, and it had already drifted — 52 listed against 53
+# registered, with `find_tool` missing entirely. A table that silently
+# disagrees with the code is worse than no table, so here is the assertion the
+# doc was already promising.
+
+import re  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from ada import settings  # noqa: E402
+from ada.tools.registry import get as get_tool  # noqa: E402
+
+_AGENT_MD = Path(__file__).resolve().parent.parent / "AGENT.md"
+_ROW = re.compile(r"\s*`(\w+)`\s*(⚠️\*|⚠️)?\s*$")
+
+
+def _table_entries() -> dict[str, str | None]:
+    """Every tool named in the capability table, mapped to its marker.
+
+    Returns a dict rather than a set so a duplicate raises here — being listed
+    under two areas is exactly the drift this is meant to catch.
+    """
+    lines = _AGENT_MD.read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("| Area | Tools |"))
+
+    entries: dict[str, str | None] = {}
+    for line in lines[start + 2 :]:
+        if not line.startswith("|"):
+            break
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        for chunk in cells[1].split(","):
+            match = _ROW.match(chunk)
+            assert match, f"couldn't read {chunk!r} in the capability table"
+            name, marker = match.group(1), match.group(2)
+            assert name not in entries, f"{name} is listed twice in the capability table"
+            entries[name] = marker
+    return entries
+
+
+def test_the_capability_table_lists_every_tool_exactly_once():
+    listed = set(_table_entries())
+    registered = {spec["name"] for spec in tool_specs()}
+
+    assert not registered - listed, f"registered but missing from AGENT.md: {sorted(registered - listed)}"
+    assert not listed - registered, f"in AGENT.md but not registered: {sorted(listed - registered)}"
+
+
+def test_the_stated_tool_count_matches_the_table():
+    stated = int(re.search(r"^(\d+) tools\.", _AGENT_MD.read_text(), re.M).group(1))
+
+    assert stated == len(_table_entries())
+
+
+def test_the_warning_markers_match_the_real_gates():
+    """The table's safety claims are the ones most worth keeping honest: a tool
+    shown as gated that isn't is a lie about what Ada will do without asking."""
+    always = {k for k, v in settings.DEFAULTS["autonomy"]["tools"].items() if v == settings.CONFIRM}
+
+    for name, marker in _table_entries().items():
+        tool = get_tool(name)
+        per_call = tool is not None and tool.confirm_when is not None
+
+        if marker == "⚠️":
+            assert name in always, f"{name} is marked as always asking, but isn't gated in DEFAULTS"
+        elif marker == "⚠️*":
+            assert per_call, f"{name} is marked as asking per-call, but has no confirm_when predicate"
+        else:
+            assert name not in always, f"{name} is gated in DEFAULTS but shown as running freely"
+            assert not per_call, f"{name} has a confirm_when predicate but is shown as running freely"

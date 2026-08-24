@@ -84,6 +84,11 @@
       },
       "read_email": {
         "per_minute": 20
+      },
+      "start_job": {
+        "per_minute": 5,
+        "per_hour": 30,
+        "per_day": 100
       }
     }
   },

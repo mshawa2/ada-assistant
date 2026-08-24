@@ -15,7 +15,7 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-52 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+57 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
@@ -31,7 +31,8 @@ depending on the arguments (a lock, not a lamp). Everything else runs freely.
 | Mac & music | `media_control`, `play_music`, `search_music`, `system_control` |
 | Money | `get_spending`, `list_vendors`, `make_purchase` ⚠️ |
 | Memory | `forget` ⚠️, `list_memory`, `remember`, `update_memory` |
-| Ada herself | `dismiss_notice`, `get_settings`, `heartbeat`, `list_modes`, `list_notices`, `set_mode`, `set_setting` ⚠️ |
+| Background jobs | `cancel_job`, `job_status`, `list_jobs`, `start_job` |
+| Ada herself | `dismiss_notice`, `find_tool`, `get_settings`, `heartbeat`, `list_modes`, `list_notices`, `set_mode`, `set_setting` ⚠️ |
 
 ## How Ada is held back
 
@@ -1309,6 +1310,109 @@ code so the next person can re-run the judgement rather than inherit it.
 **Verified:** 536/536 tests pass. Most of them are about routing *not* costing
 a capability rather than about the saving.
 
+## Background jobs (the lifecycle built and verified; nothing runs them yet)
+
+Everything Ada does is one turn in one loop: you ask, tools run, the reply
+lands, the turn is over. Nothing survives it. The heartbeat is the one
+exception and it runs *checks* — plain Python on a fixed interval, not work you
+can start, name, inspect or stop. So "look into this and tell me later" had no
+shape to be.
+
+`ada/jobs.py` is the missing primitive: a durable record of work with a
+lifecycle. It lives outside `tools/` for the same reason `when.py` does — the
+executor will need it as much as the model does, and two copies of a state
+machine is two chances to drift.
+
+### The state machine
+
+```
+pending ──claim──> running ──finish──> done
+   │                  │
+   │                  ├──park──> waiting_approval ──resume──> running
+   │                  ├──fail──> failed ──retry──> pending
+   │                  └──reap──> pending        (owner died)
+   │
+   └──cancel──> cancelled
+```
+
+`done` and `cancelled` are terminal. **An illegal transition raises rather than
+silently no-opping**, and the error names what the state *can* do instead — a
+job that quietly refuses to change state is a job you'll believe is running
+forever.
+
+### Claiming is one atomic step, deliberately
+
+The heartbeat thread and the REPL thread share this process, and the launchd
+daemon is a second process entirely — the same collision `heartbeat/singleton.py`
+exists to prevent one tier up. Anything that lists pending jobs and *then*
+starts one has a window where two workers take the same job. With an executor
+attached that means the job's tools run twice: a message sent twice, a purchase
+made twice. So `claim()` does the read and the write under one lock. Tested
+under real contention — eight threads against twenty jobs, each claimed exactly
+once.
+
+### Orphans
+
+A process that dies mid-job leaves a record claiming to be running inside a PID
+that no longer exists, and closing the laptop is the ordinary case here, not the
+exceptional one. `reap_orphans()` checks the recorded owner with signal 0 and
+requeues abandoned work, up to `MAX_ATTEMPTS` (3), then fails it loudly.
+A `PermissionError` counts as **alive** — treating a live process as dead is
+exactly what causes the double-run this is all arranged to prevent.
+
+### Queued, not executed — and Ada says so
+
+**Nothing runs these jobs yet.** That's stated in `start_job`'s description, in
+what it returns to the model, and pinned by a test. The failure mode otherwise
+is Ada reporting she's looking into something while nothing whatsoever happens
+— the same trap as a reminder with a `due` string and no `due_at`, and it gets
+the same treatment: say plainly that it's on the list, never imply it's underway.
+
+### Why creating a job isn't gated
+
+A job record is inert; it names work, it doesn't do any. What matters is the
+tools the work later calls, and those already meet the Tier 6 rails per call in
+`agent.py` — a background turn wanting `send_message` hits exactly the rail a
+foreground turn does. Gating creation *as well* would ask the user to approve a
+description and then approve the action, which teaches people to click through
+both. The rail belongs where the consequence is. `start_job` is rate-limited
+instead (5/min, 30/hour, 100/day, in `DEFAULTS` as well as the shipped config),
+which is not a safety rail but a backstop against a model in a loop queueing
+work until the disk fills — a real failure mode for a tool that always succeeds.
+
+### Three fields written now and read later
+
+Added at creation rather than when they're needed, because adding them once the
+file holds real jobs means migrating records that already exist:
+
+- **`tools`** — the allowlist a background turn may call. `routing.py` computes
+  a relevant subset today as an *optimization, never a capability limit*, which
+  is right for conversation and exactly wrong for unattended work. This is where
+  least privilege gets enforced instead of suggested.
+- **`budget_usd`** — this job's slice. `budget.limits.model` is one global pool,
+  so without a slice one runaway job starves the conversation you're having.
+- **`pending_approval`** — the parked action from a confirmation nobody was
+  there to answer.
+
+### What comes next, in order
+
+1. **The approval queue.** `confirm` blocks on a human at a terminal. At 3am
+   there isn't one, and neither auto-approving `send_message` nor auto-denying
+   it is defensible. A headless `confirm` implementation parks the action on the
+   job instead (`park()` is already here and tested) and Ada raises it through
+   `heartbeat/notices.py`, which already knows about quiet hours and levels.
+   **This lands before any unattended model turn, not after.**
+2. **The executor.** A heartbeat check that claims a job and runs
+   `agent.run_turn` against it — with the job's `tools` allowlist enforced, its
+   `budget_usd` slice, and `confirm` wired to the queue from step 1. That is the
+   step that makes a job an agent process rather than a note to self.
+3. **A real scheduler.** `run_at` is already honoured by `claim()`; what's
+   missing is recurrence, one-shot times, backoff on failure, and a
+   `schedule_job` tool so Ada can install her own daemons instead of the
+   hardcoded `CHECKS` dict.
+4. **Context paging** — summarize the dropped session prefix, and give each job
+   its own context rather than sharing the conversation's.
+
 ## Consolidation notes
 
 The sections above are in **build order**, not importance order — each records
@@ -1317,9 +1421,13 @@ value and why they aren't summarised away. The three sections at the top
 ("What Ada can do", "How Ada is held back", "What isn't verified") are the way
 in; read those first and dip into a section when you need the why.
 
-The capability table is generated from the live tool registry rather than
-hand-maintained, with an assertion that every registered tool appears exactly
-once. A table that silently disagrees with the code is worse than no table.
+The capability table is hand-written but **asserted against the live registry**
+(`tests/test_tools.py`): every registered tool appears exactly once, the stated
+count matches, and the ⚠️ markers are checked against the real gates — a tool
+shown as running freely that is actually gated, or the reverse, fails the suite.
+A table that silently disagrees with the code is worse than no table, and this
+one had drifted: the claim used to say "generated", nothing enforced it, and
+`find_tool` was missing from the table entirely until the assertion caught it.
 
 **What was consolidated:**
 
@@ -1358,6 +1466,9 @@ and Mac control; and a consolidation pass.**
 Recorded so they're a decision rather than an oversight:
 
 - **Session trimming drops the old prefix rather than summarizing it.**
+- **Jobs are queued but never run.** The lifecycle is built and tested; the
+  executor that gives a job a model turn is the next tier, and the approval
+  queue has to land before it. Ada says so rather than implying otherwise.
 - **Music is library-only and Apple Music only** — Ada can play what the user
   has added, not the whole streaming catalogue, and says so rather than
   implying otherwise.

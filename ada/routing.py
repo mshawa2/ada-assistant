@@ -50,6 +50,7 @@ CORE = {
     "fetch_url",
     "get_weather",
     "list_notices",
+    "list_jobs",
 }
 
 # Words that mean a tool without sharing its vocabulary. Deliberately small —
@@ -71,6 +72,7 @@ _HINTS = {
     "shopping": ["groceries", "buy", "milk"],
     "weather": ["rain", "sunny", "cold", "hot", "forecast", "temperature"],
     "heartbeat": ["quiet", "proactive", "background"],
+    "job": ["background", "queue", "queued", "later", "progress", "underway", "still"],
 }
 
 _WORD = re.compile(r"[a-z0-9]+")

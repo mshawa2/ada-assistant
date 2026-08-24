@@ -7,6 +7,7 @@ from ada.tools import (  # noqa: F401  imported for tool-registration side effec
     heartbeat_control,
     home,
     imessage,
+    jobs_tool,
     mac,
     memory,
     messages,
