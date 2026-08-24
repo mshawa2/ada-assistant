@@ -77,6 +77,8 @@ _HINTS = {
     "job": ["background", "queue", "queued", "later", "progress", "underway", "still"],
     "approval": ["approve", "approval", "blocked", "permission"],
     "schedule": ["recurring", "repeat", "daily", "weekly", "automatically", "morning", "routine"],
+    "position": ["stock", "shares", "portfolio", "holding", "bought", "sold", "ticker", "invested"],
+    "price": ["stock", "ticker", "shares", "trading", "market", "quote"],
 }
 
 _WORD = re.compile(r"[a-z0-9]+")

@@ -14,6 +14,7 @@ from ada.tools import (  # noqa: F401  imported for tool-registration side effec
     messages,
     notes,
     notices,
+    positions_tool,
     purchasing,
     reminders,
     schedules_tool,

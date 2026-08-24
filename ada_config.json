@@ -172,6 +172,10 @@
       "run_schedules": {
         "enabled": true,
         "interval_seconds": 60
+      },
+      "positions": {
+        "enabled": true,
+        "interval_seconds": 300
       }
     }
   },

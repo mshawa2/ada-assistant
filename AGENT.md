@@ -15,7 +15,7 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-62 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+67 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
@@ -34,6 +34,7 @@ depending on the arguments (a lock, not a lamp). Everything else runs freely.
 | Background jobs | `cancel_job`, `job_status`, `list_jobs`, `start_job` |
 | Approvals | `list_approvals`, `resolve_approval` ⚠️ |
 | Recurring work | `list_schedules`, `manage_schedule`, `schedule_job` |
+| Holdings | `add_position`, `check_price`, `list_positions`, `remove_position`, `update_position` |
 | Ada herself | `dismiss_notice`, `find_tool`, `get_settings`, `heartbeat`, `list_modes`, `list_notices`, `set_mode`, `set_setting` ⚠️ |
 
 ## How Ada is held back
@@ -1866,6 +1867,73 @@ rather than starting its own. The conversation still reaches the page via the
 transcript on disk. What doesn't is the REPL's *live* state — the streaming
 reply, the armed list, a confirmation waiting on a keypress. Those are process
 memory and belong to the terminal you're typing in.
+
+## Holdings and price alerts (built and verified against live prices)
+
+The request was "Robinhood analysis and an indicator to tell me when to sell".
+Two things about that had to change before anything was worth building.
+
+**Robinhood has no public API.** The unofficial clients log in with the user's
+password and MFA, which means brokerage credentials on disk, breakage whenever
+the private API moves, and a violation of terms the user agreed to.
+`ada/brokerage.py` is a **SnapTrade** seam instead: read-only OAuth through
+Robinhood's own authorisation, no password ever reaching Ada. The keys aren't
+configured yet, and the module is loud about being unconnected rather than
+returning an empty list — "no positions" and "never linked" are the same shape
+and opposite meanings, and confusing them is how someone concludes they sold
+something.
+
+**Indicators don't tell you when to sell.** So none of them fire an alert, and
+a test enforces it. RSI at 95 raises nothing. What `ada/positions.py` alerts on
+is arithmetic against a number *the user chose*: their stop, their target,
+their trailing drawdown from the high since they bought. That's not prediction,
+it's the agent holding them to what they decided while calm.
+
+### The field that earns its place
+
+`invalidation` — "I'd be wrong if hyperscaler capex guidance turns down two
+quarters running". A stop is a level; this is a *reason*, and it's what people
+mean and never write down. It's handed back to them inside the alert, because
+the alert arrives when the price is moving and they are not calm, and the
+sentence they wrote when they were is the most useful thing that can be beside
+it. `add_position` asks for it when it's missing.
+
+### Deliberate limits
+
+- **Nothing can trade.** No order path, no broker write, no sell tool; the most
+  this reaches is a notification. A test asserts no tool is named `buy_*`,
+  `sell_*`, `trade_*` or `order_*`. An agent that can act on a price alert
+  unattended is a different and much worse product.
+- **Alerts fire once and re-arm when the condition clears**, same shape as
+  `reminders`' `due_notified`. A stop that's been hit is still hit tomorrow,
+  and re-sending it every five minutes is how someone learns to ignore the one
+  that mattered. Moving a stop re-arms it — it's a new decision.
+- **A stop is the only thing worth `critical`**, which interrupts quiet hours.
+  Targets, trailing drops and earnings are `urgent`; indicators are `normal`
+  and never alert at all.
+- **Only during US market hours**, weekends excluded. Holidays aren't handled,
+  deliberately: the failure mode is checking prices on Thanksgiving and raising
+  nothing new because the alerts already fired, and a holiday calendar is a
+  dependency bought for a day of silence.
+- **A price that can't be read is "don't know", never "nothing to report".**
+  A flaky endpoint must not look like calm.
+
+### Prices are free and keyless
+
+Yahoo's public chart endpoint, same trade `weather.py` makes with Open-Meteo:
+live price, day and 52-week ranges, and a year of daily closes in one call, no
+account and nothing to leak. It's undocumented rather than a product, so
+`quote()` fails with a clear message rather than half-parsing.
+
+One bug that only showed up by reading the output: today's move was coming out
+as **+17%** because `meta.chartPreviousClose` on a one-year range is the close
+before the *whole window*, not yesterday. The prior daily close is the
+second-from-last entry in the series.
+
+The check is deterministic — no model call, no tools, no job. An alert about a
+price has to be instant and free, and a stop being hit is arithmetic; routing
+it through a language model would add latency, cost, and a chance of the level
+being paraphrased into one the user never set.
 
 ## Consolidation notes
 
