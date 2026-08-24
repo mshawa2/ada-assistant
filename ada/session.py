@@ -21,12 +21,18 @@ Two things make this more than a `json.dump`:
 
 from typing import Any
 
-from ada import store
+from ada import recap, store
 
 # Roughly a few dozen exchanges. Deliberately a message count, not a token
-# count: it's the cheap, predictable version, and the honest next step here is
-# summarizing the dropped prefix rather than tuning this number.
+# count: it's the cheap, predictable version, and tuning it was never the
+# interesting problem — what happened to the messages past it was.
 MAX_MESSAGES = 60
+
+# The recap rides inside the cap, not on top of it. Two slots reserved for it
+# when a trim happens, because a transcript of MAX_MESSAGES + 2 is over the
+# line the next `load()` enforces — which would drop the recap immediately and
+# leave Ada paying for a summary on every turn and keeping none of them.
+RECAP_MESSAGES = 2
 
 _STORE = store.DATA_DIR / "session.json"
 _lock = store.lock_for(_STORE)
@@ -105,16 +111,40 @@ def load() -> list[dict]:
     return trim(valid)
 
 
+def _recap_pair(summary: str) -> list[dict]:
+    """The summary, as two messages rather than one.
+
+    A lone user message would leave two user turns back to back where the kept
+    transcript starts with the user's own words. The acknowledgement keeps the
+    alternation honest and costs a dozen tokens.
+    """
+    return [
+        {"role": "user", "content": f"{recap.MARKER}\n{summary}"},
+        {"role": "assistant", "content": "Got it — I have that context."},
+    ]
+
+
 def record(messages: list[dict]) -> None:
     """Trim `messages` in place to the cap, then persist it.
 
     In place on purpose: the caller's live list is the same one handed to the
     model next turn, so trimming a copy would cap the file while letting the
     in-memory context grow forever.
+
+    What falls off is summarized rather than discarded, and the summary rides
+    at the *front* of what's kept — so the next trim summarizes the summary
+    along with whatever else fell off, and the recap rolls forward instead of
+    accumulating one block per trim. If the summary can't be produced, the
+    prefix is dropped exactly as it always was; see `ada/recap.py`.
     """
-    trimmed = trim(messages)
+    trimmed = trim(messages, MAX_MESSAGES - RECAP_MESSAGES) if len(messages) > MAX_MESSAGES else list(messages)
+
     if len(trimmed) != len(messages):
+        dropped = messages[: len(messages) - len(trimmed)]
+        summary = recap.summarize(to_plain(dropped))
+        trimmed = (_recap_pair(summary) + trimmed) if summary else trimmed
         messages[:] = trimmed
+
     with _lock:
         store.write_json(_STORE, to_plain(messages))
 
@@ -130,7 +160,13 @@ def resumed_summary(messages: list[dict]) -> str | None:
     """A one-liner for startup, or None when there's nothing to resume."""
     if not messages:
         return None
-    exchanges = sum(1 for m in messages if m.get("role") == "user" and isinstance(m.get("content"), str))
+    exchanges = sum(
+        1
+        for m in messages
+        if m.get("role") == "user"
+        and isinstance(m.get("content"), str)
+        and not m["content"].startswith(recap.MARKER)
+    )
     if not exchanges:
         return None
     plural = "s" if exchanges != 1 else ""

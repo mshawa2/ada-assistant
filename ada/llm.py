@@ -43,6 +43,40 @@ class LLMError(Exception):
     """Raised when the model provider can't be reached or fails."""
 
 
+def complete(prompt: str, max_tokens: int = 512) -> str:
+    """One short, tool-free, un-streamed answer.
+
+    Not every model call is a turn. Summarizing a conversation's dropped prefix
+    needs no tools, no history and no streaming — sending it through
+    `stream_turn` would hand it the whole system prompt and tool catalogue to
+    do a job that fits in a paragraph.
+
+    Deliberately without the assistant persona: the caller wants a summary, not
+    Ada being playful about one.
+    """
+    try:
+        budget.check(budget.MODEL)
+    except budget.BudgetExceeded as e:
+        raise LLMError(str(e)) from e
+
+    try:
+        message = _client.messages.create(
+            model=settings.get("model.conversation", DEFAULT_MODEL),
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.APIConnectionError as e:
+        raise LLMError("Couldn't reach the model — check your network connection.") from e
+    except anthropic.APIStatusError as e:
+        raise LLMError(f"The model provider returned an error: {e.message}") from e
+
+    usage = message.usage
+    cost.record(usage.input_tokens, usage.output_tokens)
+    audit.log("model_call", purpose="complete", input_tokens=usage.input_tokens, output_tokens=usage.output_tokens)
+
+    return "".join(block.text for block in message.content if getattr(block, "type", None) == "text").strip()
+
+
 def stream_turn(messages: list[dict], tools: list[dict]) -> Iterator[str]:
     """Send one turn to the model and yield reply text as it streams in.
 

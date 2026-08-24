@@ -37,16 +37,27 @@ me to dig further", to nobody, and the job's stored result is a question.
   inspection, including `LLMError` from being over the global budget — a job is
   not a good reason to blow through a spending cap.
 
-## What isn't here yet
+## Resuming
 
-A job re-run after approval **starts its turn over**. Whatever it did before
-parking, it does again. That's survivable because the gated actions — the ones
-that can't be taken twice — are exactly the ones that stop and ask, and a grant
-is matched to exact arguments. It is still the strongest argument for
-persisting a job's transcript, which is the next tier's job.
+A job that stops — parked for approval, or waiting out a backoff — keeps its
+transcript, so its next run picks up where it left off instead of redoing every
+search that led there. What's stripped first is a trailing `tool_use` that
+never got its `tool_result`: the API rejects a dangling tool call, and that
+block is precisely the action that was interrupted.
+
+So the model resumes seeing everything it did and re-decides the last step. If
+it asks for the same thing again, the grant matches and it goes through. If it
+asks for something else, that parks in its turn, which is the right answer
+rather than a bug. **No note is injected saying "you were approved"** — the
+transcript ends on a user `tool_result`, and appending another user message
+there would put two user turns back to back to tell the model something it
+doesn't need to know.
+
+The transcript is dropped the moment a job reaches a terminal state. It's a
+resume point, not a record; `result` and `log` are the record.
 """
 
-from ada import approvals, audit, budget, cost, jobs
+from ada import approvals, audit, budget, cost, jobs, session
 from ada.heartbeat.notices import add_notice
 
 # What the user sees of a result before it's cut short. A notice is a nudge to
@@ -103,6 +114,36 @@ def _final_text(messages: list[dict]) -> str:
     return ""
 
 
+def _resumable(messages: list[dict], tool_results: list[dict] | None = None) -> list[dict]:
+    """The transcript, made legal to send back.
+
+    A turn that stops inside `_execute_tool_calls` has already appended the
+    assistant message asking for its tools, and never appended their results.
+
+    If the gate handed back the results it had — everything that ran before it
+    stopped, plus an honest "paused, awaiting approval" for the one that
+    didn't — the round is completed with those and kept whole. That matters
+    more than it sounds: a model routinely asks for several tools at once, so
+    dropping the round throws away work that actually happened.
+
+    Failing that, the unanswered ask comes off the end and the model decides
+    that step again from the last complete round.
+    """
+    plain = session.to_plain(messages)
+
+    if tool_results and plain and plain[-1].get("role") == "assistant":
+        return plain + [{"role": "user", "content": list(tool_results)}]
+    while plain and plain[-1].get("role") == "assistant":
+        content = plain[-1].get("content")
+        if isinstance(content, list) and any(
+            block.get("type") == "tool_use" for block in content if isinstance(block, dict)
+        ):
+            plain.pop()
+            continue
+        break
+    return plain
+
+
 def _preview(text: str) -> str:
     text = " ".join(text.split())
     return text if len(text) <= RESULT_PREVIEW else text[:RESULT_PREVIEW].rstrip() + "…"
@@ -137,8 +178,11 @@ def run_one(job: dict, level: str = "urgent") -> str:
         add_notice("jobs", f"Job #{job_id} stopped: it used up its budget.", level=level)
         return jobs.FAILED
 
-    messages = [{"role": "user", "content": _prompt(job)}]
-    audit.log("job_started", job=job_id, task=job["task"], tools=job.get("tools"))
+    resuming = job.get("transcript")
+    messages = list(resuming) if resuming else [{"role": "user", "content": _prompt(job)}]
+    audit.log(
+        "job_started", job=job_id, task=job["task"], tools=job.get("tools"), resumed=bool(resuming)
+    )
 
     with cost.meter() as spent_so_far:
         try:
@@ -149,10 +193,13 @@ def run_one(job: dict, level: str = "urgent") -> str:
                 confirm=approvals.headless(job_id),
                 allowed_tools=job.get("tools"),
             )
-        except approvals.Parked:
+        except approvals.Parked as parked:
             # Already `waiting_approval`, and the notice went out when it
-            # parked. `messages` is deliberately dropped on the floor.
+            # parked. What's kept is where it got to — including any tools that
+            # ran in the same batch before the gate stopped it, which the
+            # exception carries out for exactly this reason.
             jobs.record_spend(job_id, spent_so_far())
+            jobs.save_transcript(job_id, _resumable(messages, getattr(parked, "tool_results", None)))
             audit.log("job_parked", job=job_id)
             return jobs.WAITING_APPROVAL
         except Exception as e:
@@ -167,6 +214,9 @@ def run_one(job: dict, level: str = "urgent") -> str:
                 return jobs.FAILED
 
             delay = jobs.backoff_for(attempts)
+            # Kept for the same reason as parking: a job that broke on its
+            # fourth search shouldn't redo the first three.
+            jobs.save_transcript(job_id, _resumable(messages))
             jobs.retry_later(job_id, delay, reason)
             # Deliberately no notice: a transient failure that fixes itself on
             # the next attempt isn't news, and a notice per retry would train

@@ -1416,8 +1416,7 @@ file holds real jobs means migrating records that already exist:
 1. ~~The approval queue.~~ **Built.**
 2. ~~The executor.~~ **Built.**
 3. ~~A real scheduler.~~ **Built.**
-4. **Context paging** — summarize the dropped session prefix, and give each job
-   its own persisted transcript rather than starting its turn over every run.
+4. ~~Context paging.~~ **Built.** All five tiers done.
 
 ## The approval queue (built and verified)
 
@@ -1581,14 +1580,6 @@ sentence that was already one. `delete_event` still uses the generic wording;
 describing it needs a store lookup inside a confirmation prompt, which is a
 worse trade than an ugly sentence.
 
-### The known rough edge
-
-**A job re-run after approval starts its turn over.** Whatever it did before
-parking, it does again. That's survivable because the actions that can't be
-taken twice are exactly the ones that stop and ask, and a grant is matched to
-exact arguments — but it's the strongest argument for persisting a job's
-transcript, which is what the next tier is for.
-
 ## Recurring work (built and verified, including against a real model)
 
 `run_at` on a job already says "not before three". What it can't say is "every
@@ -1657,6 +1648,79 @@ directory: `run_schedules` created a job that inherited the template's
 `tools=["get_weather"]` and `budget_usd=0.25`, `run_jobs` ran it against the
 real model and finished with a real answer, and the schedule re-armed itself
 for the next morning. **$0.0075.**
+
+## Context paging (built and verified, including against a real model)
+
+Two halves of one problem: a conversation outgrows its window, and a job
+outgrows a single turn. The cheap answer to both is to throw the old part away,
+and in both cases that loses work that was actually done.
+
+### The dropped session prefix is summarized, not discarded
+
+`session.py` used to cut the transcript at 60 messages and drop the rest.
+Durable *facts* were already safe — `remember` puts those in `memory.json` —
+but a fact has to be noticed to be remembered, and most of what matters in a
+long conversation was never noticed, just said.
+
+`ada/recap.py` summarizes the dropped prefix instead, via `llm.complete()` —
+a new tool-free, un-streamed, persona-free call, because sending a paragraph's
+worth of work through `stream_turn` would hand it the whole system prompt and
+tool catalogue to do it.
+
+The recap rides at the **front** of what's kept, so the next trim summarizes
+the recap along with whatever else fell off: it rolls forward rather than
+accumulating one block per trim. It's two messages (a user note and a
+one-line acknowledgement) so the turns stay alternating, and `RECAP_MESSAGES`
+is reserved *inside* the cap rather than added on top — a transcript of
+`MAX_MESSAGES + 2` is over the line the next `load()` enforces, which would
+drop the recap immediately and leave Ada paying for a summary every turn and
+keeping none of them. Found by a test, not by reasoning.
+
+**It fails soft, always.** A recap that can't be produced — provider down,
+budget spent — falls back to exactly the old behaviour. Losing context is a bad
+outcome; refusing to talk is a worse one.
+
+### A job keeps its place
+
+A job that parks for approval or waits out a backoff keeps its transcript, so
+the next run picks up rather than redoing every search that led there. The
+transcript is dropped the moment the job reaches a terminal state: it's a
+resume point, not a record — `result` and `log` are the record.
+
+**The torn round.** A turn that stops inside `_execute_tool_calls` has already
+appended the assistant message asking for its tools and never appended their
+results, and the API rejects a dangling tool call. The first version simply
+dropped that round — which a live run immediately showed to be wrong: **the
+model routinely asks for several tools in one message**, so a job that had
+already fetched the weather lost it when the *next* tool in the same batch hit
+the gate. Now the gate carries its partial results out on the exception: every
+tool that ran keeps its real result, the one that stopped gets an honest one,
+and anything behind it is answered too, because every `tool_use` block must be
+answered or the whole transcript is rejected.
+
+### Writing for the only reader a message will ever have
+
+The paused tool_result first read *"this needs the user's approval and has not
+run."* True when written — and that message is **only ever read again after an
+approval**, since a refusal cancels the job. A real run took it at face value
+and reported it couldn't finish, so the approved action never happened.
+
+It now says the action **has since been APPROVED** and to call the tool again
+with the same arguments. Not a wording nicety: a transcript that outlives its
+turn has a different audience from the turn that produced it, and the first
+version was written for the wrong one.
+
+### Verified live
+
+- **The recap**: an 80-message conversation trimmed to 60. The real summary
+  caught the flight-date correction, the standing aisle-seat preference, and
+  that the Mitte booking was left unresolved — none of which any tool had been
+  asked to remember.
+- **The resume**: a job that fetched the weather, hit the gate on `list_notes`,
+  parked, was approved, and on its second run consumed the grant and finished
+  with the real answer. Its history reads `used the approval for list_notes`.
+  Two runs, **$0.0059** total — cheaper than the first attempt, because it
+  didn't refetch the weather.
 
 ## Consolidation notes
 

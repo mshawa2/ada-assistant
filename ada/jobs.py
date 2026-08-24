@@ -188,6 +188,7 @@ def create(
             "spent_usd": 0.0,
             "pending_approval": None,
             "granted": None,
+            "transcript": None,
             "log": [],
         }
         _note(job, PENDING, "created")
@@ -285,6 +286,7 @@ def finish(job_id: int, result: str) -> dict:
         owner_pid=None,
         pending_approval=None,
         granted=None,
+        transcript=None,
     )
 
 
@@ -299,6 +301,7 @@ def fail(job_id: int, error: str) -> dict:
         owner_pid=None,
         pending_approval=None,
         granted=None,
+        transcript=None,
     )
 
 
@@ -409,12 +412,30 @@ def cancel(job_id: int, reason: str = "cancelled by the user") -> dict:
         owner_pid=None,
         pending_approval=None,
         granted=None,
+        transcript=None,
     )
 
 
 def retry(job_id: int) -> dict:
     """Put a failed job back on the queue, attempts intact."""
     return _transition(job_id, PENDING, "requeued for another attempt", error=None, finished_at=None)
+
+
+def save_transcript(job_id: int, messages: list[dict]) -> None:
+    """Keep where this job got to, so its next run doesn't start over.
+
+    Only ever called with a transcript that can legally be sent back: the
+    caller strips a trailing `tool_use` that never got its `tool_result`,
+    because the API rejects a dangling tool call and a job that can't resume is
+    worse than one that starts again.
+    """
+    with _lock:
+        jobs = _load()
+        job = next((j for j in jobs if j["id"] == job_id), None)
+        if job is None:
+            return
+        job["transcript"] = list(messages) or None
+        _save(jobs)
 
 
 def record_spend(job_id: int, amount: float) -> float:

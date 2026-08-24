@@ -142,6 +142,36 @@ def _describe_action(name: str, tool_input: dict) -> str:
     return f"Ada wants to run '{name}' ({args}). This can't be undone automatically."
 
 
+def _not_reached(final_message, after: str) -> list[dict]:
+    """Placeholder results for tools in the same message that never ran.
+
+    Every `tool_use` block must be answered or the whole transcript is
+    rejected on the way back in, so the ones behind the one that stopped get
+    an answer saying exactly that.
+    """
+    remaining = []
+    seen = False
+    for block in final_message.content:
+        if block.type != "tool_use":
+            continue
+        if block.id == after:
+            seen = True
+            continue
+        if seen:
+            remaining.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": (
+                        "Not run: the job stopped to ask the user about an earlier action in "
+                        "this batch. Call it again if you still need it."
+                    ),
+                    "is_error": True,
+                }
+            )
+    return remaining
+
+
 def _execute_tool_calls(
     final_message,
     on_status: Callable[[str], None],
@@ -212,6 +242,41 @@ def _execute_tool_calls(
             status.set_pending_confirmation(action.description)
             try:
                 approved = confirm(action)
+            except BaseException as stopped:
+                # A gate that stops the turn rather than answering — the
+                # unattended one, which parks and asks a human later.
+                #
+                # The model can ask for several tools in one message, and by
+                # here some of them have already run. Losing those results
+                # means redoing that work on the next attempt, so they're
+                # carried out on the exception along with an honest result for
+                # the one that stopped and for anything after it. The caller
+                # can then persist a complete round instead of a torn one.
+                results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        # Written for the only reader it will ever have. This
+                        # message is persisted and re-read on the *next* run,
+                        # which for a parked job only happens once the user has
+                        # said yes — so phrasing it as "this has not run" left
+                        # the model reporting it couldn't, instead of doing it.
+                        # "They have answered" is ambiguous — answered *how?* —
+                        # and a real run took it as a refusal and reported it
+                        # couldn't finish. The transcript carrying this message
+                        # is only ever re-read after an approval (a refusal
+                        # cancels the job), so it can say so outright.
+                        "content": (
+                            "Paused: this needed the user's approval, so it did not run. "
+                            "It has since been APPROVED. Call this tool again now, with "
+                            "exactly the same arguments, to carry it out."
+                        ),
+                        "is_error": True,
+                    }
+                )
+                results.extend(_not_reached(final_message, after=block.id))
+                stopped.tool_results = results
+                raise
             finally:
                 status.set_pending_confirmation(None)
             audit.log("confirmation_requested", tool=block.name, input=block.input, approved=approved)
