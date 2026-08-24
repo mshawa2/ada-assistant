@@ -15,7 +15,7 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-67 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+68 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
@@ -34,7 +34,7 @@ depending on the arguments (a lock, not a lamp). Everything else runs freely.
 | Background jobs | `cancel_job`, `job_status`, `list_jobs`, `start_job` |
 | Approvals | `list_approvals`, `resolve_approval` ⚠️ |
 | Recurring work | `list_schedules`, `manage_schedule`, `schedule_job` |
-| Holdings | `add_position`, `check_price`, `list_positions`, `remove_position`, `update_position` |
+| Holdings | `add_position`, `check_price`, `list_positions`, `remove_position`, `review_holding`, `update_position` |
 | Ada herself | `dismiss_notice`, `find_tool`, `get_settings`, `heartbeat`, `list_modes`, `list_notices`, `set_mode`, `set_setting` ⚠️ |
 
 ## How Ada is held back
@@ -1934,6 +1934,68 @@ The check is deterministic — no model call, no tools, no job. An alert about a
 price has to be instant and free, and a stop being hit is arithmetic; routing
 it through a language model would add latency, cost, and a chance of the level
 being paraphrased into one the user never set.
+
+## Two-sided review (built and verified against a live position)
+
+The ask was to pull in **TradingAgents** (Apache-2.0). Checking rather than
+remembering changed the answer: its `pyproject.toml` needs Python **>=3.10**,
+not the 3.12 the README implies, so the runtime was never the problem. The
+dependencies are — 22 direct, including `langgraph`, four LangChain provider
+SDKs, `pandas`, `redis` (a server) and `backtrader` (a backtesting engine),
+onto Ada's 41-package tree.
+
+**Ada is already that framework.** Per-role tool allowlists, a budget meter, a
+job table, a scheduler, an approval gate. LangGraph would be reimplementing,
+worse, the plumbing that's already here. What was worth taking is the *shape* —
+independent roles that argue, then a synthesis — which is `ada/debate.py`, a
+little over 200 lines with no new dependencies.
+
+### Separate contexts, not one clever prompt
+
+Asking one model to "argue both sides" in a single turn produces a bull case
+and then a bear case written by something that already made up its mind. Each
+side gets its own message list and does its own research; neither sees the
+other until the synthesis reads both. That independence is the mechanism —
+without it this is a long prompt pretending to be a panel.
+
+### What it refuses to be
+
+It never says buy or sell, and the synthesis prompt says so explicitly. The
+output is the two cases, the conditions each needs, and — the part that
+matters — whether the holder's **own written invalidation** has moved. A model
+that has read a week of headlines is not better than you at deciding whether to
+sell; it is much better than you at noticing that the thing you said would make
+you wrong has quietly started happening.
+
+Non-determinism is stated rather than hidden: run it twice and the wording
+differs, which is exactly why it produces conditions rather than a verdict. A
+verdict that changes between runs is noise wearing a suit.
+
+### Rails
+
+- **Research is read-only and nothing it may call is gated.** A test checks
+  `RESEARCH_TOOLS` against the autonomy config, and the confirm callback passed
+  into those turns *raises* — reaching it means the allowlist and the config
+  have drifted, and silently approving or declining would hide that.
+- **The synthesis gets no tools at all.** It has both cases in front of it; a
+  turn that can search will search, spending money to fetch a headline it was
+  already handed.
+
+### What the first live run actually did
+
+NVDA, against a real position with a written invalidation. Both sides
+researched independently — 26 tool calls between them — and the synthesis found
+something better than a verdict: **they didn't disagree on any fact.** Same
+price, same circular-financing structure, same competitors. The disagreement
+was interpretive, and it named the crux. On the invalidation clause it said
+"untouched, not closer or further" and noted, unprompted, that the price stop
+could fire before the thesis-based one and asked which the holder would act on
+first.
+
+**$0.4763.** Measured, not estimated — the docstring said "a few tens of cents"
+before the first real run corrected it. At that price this is for a position
+you're uneasy about, not a daily watchlist sweep, and it's rate-limited to one
+a minute and twenty a day.
 
 ## Consolidation notes
 

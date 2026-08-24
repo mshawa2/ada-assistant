@@ -100,6 +100,11 @@
         "per_minute": 3,
         "per_hour": 15,
         "per_day": 40
+      },
+      "review_holding": {
+        "per_minute": 1,
+        "per_hour": 6,
+        "per_day": 20
       }
     }
   },

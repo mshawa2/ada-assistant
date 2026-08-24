@@ -180,3 +180,55 @@ def check_price(symbol: str) -> str:
         return market.describe(market.read(symbol))
     except market.MarketError as e:
         raise ValueError(f"Couldn't get a price for {symbol.upper()}: {e}") from e
+
+
+@tool(
+    name="review_holding",
+    description=(
+        "Run a full two-sided review of a stock: one researcher builds the strongest "
+        "honest case for holding it, another independently builds the case against, and "
+        "a third weighs both against what the user themselves wrote down when they "
+        "bought it.\n\n"
+        "Use this when the user asks you to review, re-check, stress-test or think hard "
+        "about a holding — or asks whether their reason for owning something still "
+        "holds. Do NOT use it for a simple price question; check_price is instant and "
+        "free, and this is neither.\n\n"
+        "It takes a minute or two and costs roughly $0.50 in model usage — three turns "
+        "with real web research. Say so before running it: at that price it is for a "
+        "position the user is genuinely uneasy about, not a routine check.\n\n"
+        "It deliberately does not tell anyone whether to buy or sell, and neither should "
+        "you when you report it. What it produces is the two cases, the conditions each "
+        "needs, and whether the user's own invalidation condition has moved. Present it "
+        "that way."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "Ticker to review, e.g. 'NVDA'."},
+            "full": {
+                "type": "boolean",
+                "description": (
+                    "Include both raw arguments as well as the briefing. Defaults to "
+                    "false — the briefing is the point, the arguments are the workings."
+                ),
+            },
+        },
+        "required": ["symbol"],
+    },
+)
+def review_holding(symbol: str, full: bool = False) -> str:
+    from ada import debate
+
+    result = debate.review(symbol)
+    parts = [result["briefing"]]
+
+    if full:
+        parts.append(f"\n--- the case for ---\n{result['bull']}")
+        parts.append(f"\n--- the case against ---\n{result['bear']}")
+
+    parts.append(
+        f"\n(That review cost {result['spent']:.4f} USD. It is not advice, and running it "
+        "again may word things differently — treat the conditions as the output, not any "
+        "single sentence.)"
+    )
+    return "\n".join(parts)

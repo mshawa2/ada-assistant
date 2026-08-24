@@ -141,6 +141,9 @@ DEFAULTS: dict[str, Any] = {
             "start_job": {"per_minute": 5, "per_hour": 30, "per_day": 100},
             "resolve_approval": {"per_minute": 3, "per_hour": 20, "per_day": 60},
             "schedule_job": {"per_minute": 3, "per_hour": 15, "per_day": 40},
+            # Three multi-round turns with web research. Minutes and real
+            # money per call, so it cannot be fired casually or in a loop.
+            "review_holding": {"per_minute": 1, "per_hour": 6, "per_day": 20},
         },
     },
     "purchasing": {
