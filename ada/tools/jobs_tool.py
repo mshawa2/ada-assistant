@@ -4,13 +4,11 @@ Named `jobs_tool` rather than `jobs` for the same reason `calendar_tool` isn't
 `calendar`: `ada/jobs.py` is the kernel this wraps, and one of them shadowing
 the other on an import is a confusing afternoon.
 
-**These tools queue work; they don't yet run it.** The executor that gives a
-job an actual model turn is the next tier, and until it exists a job sits at
-`pending` forever. That's said plainly in the tool description and repeated in
-what `start_job` returns, because the failure mode otherwise is Ada cheerfully
-reporting that she's looking into something while nothing whatsoever happens —
-the same trap as a reminder with no `due_at`, which is shown as explicitly
-unscheduled rather than quietly never firing.
+Jobs run: `ada/heartbeat/executor.py` claims one a tick and gives it a model
+turn. What `start_job` returns still avoids over-promising — the job is queued,
+not instant, and the heartbeat has to come round to it — because the failure
+mode here is Ada reporting she's *looking into* something the moment it's
+queued, the same trap as a reminder with no `due_at`.
 
 **Why creating a job isn't gated.** A job record is inert: it names work, it
 doesn't do any. What matters is the tools the work later calls, and those are
@@ -39,11 +37,11 @@ _OPEN_LABEL = {
         "Queue a piece of background work that should outlive this conversation — "
         "something the user wants done later, or that takes long enough that they "
         "shouldn't sit and wait for it.\n\n"
-        "IMPORTANT: jobs are queued but not yet executed — the part that actually "
-        "runs them isn't built. A job you start will sit as 'queued' until it is. "
-        "Say that plainly. Never imply you are working on it, have started it, or "
-        "will report back. If the user wants something done now, just do it in this "
-        "conversation with your normal tools instead.\n\n"
+        "A job is queued, not instant: the background loop picks it up shortly and "
+        "works on it without you. Tell the user it's queued and that you'll let them "
+        "know — never that you're working on it right now, because you aren't. If "
+        "they want something done this minute, just do it here with your normal "
+        "tools instead.\n\n"
         "This is not a reminder. Use add_reminder to nudge the user to do something "
         "themselves; use this for work Ada would do."
     ),
@@ -72,11 +70,15 @@ def start_job(task: str, run_at: str = "") -> str:
     run_epoch = when.to_epoch(run_at) if run_at else None
     job = jobs.create(task, run_at=run_epoch)
 
-    timing = f" It won't start before {when.stamp(run_epoch)}." if run_epoch else ""
+    timing = (
+        f" It won't start before {when.stamp(run_epoch)}."
+        if run_epoch
+        else " The background loop will pick it up shortly."
+    )
     return (
         f"Queued job #{job['id']}: {job['task']}.{timing} "
-        "Nothing runs it yet — the executor isn't built — so tell the user it's "
-        "on the list, not underway."
+        "Tell the user it's queued and that you'll report back — not that you're "
+        "working on it now."
     )
 
 

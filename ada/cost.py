@@ -16,6 +16,7 @@ not a code change.
 """
 
 import threading
+from contextlib import contextmanager
 
 from ada import budget, settings
 
@@ -32,6 +33,11 @@ DEFAULT_CACHE_WRITE_MULTIPLIER = 1.25
 DEFAULT_CACHE_READ_MULTIPLIER = 0.10
 
 _lock = threading.Lock()
+# Per-thread, because the totals above are process-wide and a background job
+# shares this process with whatever conversation is happening at the same
+# time. Asking "what did this job cost" of a global tally would bill it for
+# the user's own turns.
+_meters = threading.local()
 _input_tokens = 0
 _output_tokens = 0
 _cache_read_tokens = 0
@@ -67,6 +73,8 @@ def record(
     cache_write_tokens: int = 0,
 ) -> None:
     global _input_tokens, _output_tokens, _cache_read_tokens, _cache_write_tokens
+    if getattr(_meters, "spent", None) is not None:
+        _meters.spent += price_of(input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
     with _lock:
         _input_tokens += input_tokens
         _output_tokens += output_tokens
@@ -83,6 +91,24 @@ def record(
         price_of(input_tokens, output_tokens, cache_read_tokens, cache_write_tokens),
         note=note,
     )
+
+
+@contextmanager
+def meter():
+    """Measure what the model calls made on this thread cost.
+
+    Yields a callable returning the running total so far, so a long piece of
+    work can check itself partway through rather than only at the end. Nesting
+    is handled by folding the inner total back into the outer one on exit — an
+    inner measurement shouldn't make an outer one forget the money was spent.
+    """
+    outer = getattr(_meters, "spent", None)
+    _meters.spent = 0.0
+    try:
+        yield lambda: _meters.spent
+    finally:
+        inner = _meters.spent
+        _meters.spent = None if outer is None else outer + inner
 
 
 def totals() -> dict:

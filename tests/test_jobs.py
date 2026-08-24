@@ -374,14 +374,15 @@ def test_reaping_ignores_jobs_that_were_never_running(monkeypatch):
 # --- the tools --------------------------------------------------------------
 
 
-def test_start_job_says_plainly_that_nothing_runs_it_yet():
-    """The failure mode this guards against is Ada reporting she's looking
-    into something while nothing whatsoever happens — the same trap as a
-    reminder with no due_at."""
+def test_start_job_does_not_let_ada_claim_she_is_already_working_on_it():
+    """The job is queued, not instant — the heartbeat has to come round to it.
+    Ada saying "I'm looking into that" the moment it's queued is the same trap
+    as a reminder with no due_at."""
     result = jobs_tool.start_job("research train times to Edinburgh")
 
     assert "#1" in result
-    assert "Nothing runs it yet" in result
+    assert "queued" in result
+    assert "not that you're working on it now" in result
     assert jobs.load_jobs()[0]["state"] == jobs.PENDING
 
 

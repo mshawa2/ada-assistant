@@ -157,6 +157,12 @@
       "new_notes": {
         "enabled": true,
         "interval_seconds": 300
+      },
+      "run_jobs": {
+        "enabled": true,
+        "interval_seconds": 60,
+        "max_jobs_per_tick": 1,
+        "level": "urgent"
       }
     }
   },

@@ -1377,13 +1377,12 @@ requeues abandoned work, up to `MAX_ATTEMPTS` (3), then fails it loudly.
 A `PermissionError` counts as **alive** — treating a live process as dead is
 exactly what causes the double-run this is all arranged to prevent.
 
-### Queued, not executed — and Ada says so
+### Queued *and* executed
 
-**Nothing runs these jobs yet.** That's stated in `start_job`'s description, in
-what it returns to the model, and pinned by a test. The failure mode otherwise
-is Ada reporting she's looking into something while nothing whatsoever happens
-— the same trap as a reminder with a `due` string and no `due_at`, and it gets
-the same treatment: say plainly that it's on the list, never imply it's underway.
+Jobs run — see "The executor" below. `start_job` still refuses to let Ada claim
+she's *working on it*: a job is queued, not instant, and the heartbeat has to
+come round to it. Same trap as a reminder with a `due` string and no `due_at`,
+same treatment, pinned by a test.
 
 ### Why creating a job isn't gated
 
@@ -1413,21 +1412,14 @@ file holds real jobs means migrating records that already exist:
 
 ### What comes next, in order
 
-1. ~~The approval queue.~~ **Built** — see the next section.
-2. **The executor.** A heartbeat check that claims a job and runs
-   `agent.run_turn` against it, with the job's `tools` allowlist enforced as a
-   real boundary, its `budget_usd` slice applied, and `confirm` wired to
-   `approvals.headless()`. It must catch `approvals.Parked` and **discard that
-   turn's messages** rather than persist them — the last `tool_use` block never
-   got its `tool_result`, and the API rejects a dangling tool call on the way
-   back in. That is the step that makes a job an agent process rather than a
-   note to self.
+1. ~~The approval queue.~~ **Built.**
+2. ~~The executor.~~ **Built.**
 3. **A real scheduler.** `run_at` is already honoured by `claim()`; what's
    missing is recurrence, one-shot times, backoff on failure, and a
    `schedule_job` tool so Ada can install her own daemons instead of the
    hardcoded `CHECKS` dict.
 4. **Context paging** — summarize the dropped session prefix, and give each job
-   its own context rather than sharing the conversation's.
+   its own persisted transcript rather than starting its turn over every run.
 
 ## The approval queue (built and verified)
 
@@ -1501,6 +1493,80 @@ The startup greeting **leads with blocked work**, and checks approvals
 independently of the notice log — dismissing a notice must not make a job
 that's still waiting invisible.
 
+## The executor (built, verified against fakes)
+
+`ada/heartbeat/executor.py` is where a job stops being a record and becomes
+work. It's the first thing Ada does with tools while nobody is watching, which
+is why it landed last: every rail it needs was built before it.
+
+### It runs as a heartbeat check
+
+So it inherits what the heartbeat already guarantees. `singleton.py` means one
+process owns it, so two executors can't race for a job on top of the race
+`claim()` already prevents. The kill switch pauses it with everything else. A
+check that raises is caught and logged rather than taking the loop down.
+
+**One job per tick** (`max_jobs_per_tick`, default 1). Checks run sequentially
+in one thread, so a job that thinks for forty seconds is forty seconds a due
+reminder doesn't fire. Draining ten in a tick would make that ten times worse.
+
+`loop.start()` now also calls `jobs.reap_orphans()` when it takes the lock —
+whoever owns the heartbeat owns the executor, so that's where a job abandoned
+by a closed laptop goes back on the queue, and it's safe there precisely
+because the lock means one process is doing it.
+
+### The model is told it's alone
+
+Not the conversational prompt. A job turn is framed as unattended, with no user
+to ask and no follow-up coming, and told that its final reply *is* the result.
+Without that it writes "let me know if you'd like me to dig further", to
+nobody, and the job's stored result is a question. The result is read back off
+the message list rather than accumulated from the text stream, because the
+stream carries every round's commentary and "let me check that" is not a result.
+
+### Three ways a turn ends
+
+- **Finishes** — the last assistant text becomes the result, and a notice
+  carries a preview to the user. The whole thing stays on the job.
+- **Parks** (`approvals.Parked`) — not a failure. The job is already
+  `waiting_approval` and the notice went out when it parked, so no second one
+  is raised. **The turn's messages are dropped rather than persisted**: the
+  last `tool_use` block never got its `tool_result`, and the API rejects a
+  dangling tool call on the way back in.
+- **Breaks** — failed, with the error kept for inspection. That includes
+  `LLMError` from being over the global cap: a background job is not a good
+  enough reason to blow through a limit the user set.
+
+### The tool allowlist is a boundary, not a hint
+
+`agent.run_turn` grew an `allowed_tools` argument. `None` means a conversation:
+the usual routing, which is explicitly an optimization and never a capability
+limit. A list means a job, and then the list is the whole world — it decides
+what schemas are sent **and** is checked again before any tool runs, because
+the first is only a suggestion to a model and the second is the actual gate.
+A restricted job gets no `find_tool` either: the escape hatch would only show
+it things it still can't call.
+
+### Money
+
+`cost.meter()` measures what the model calls on *this thread* cost — per-thread
+because the totals are process-wide and a job shares the process with whatever
+conversation is happening at the same time; asking a global tally what a job
+cost would bill it for the user's own turns. The total lands on the job as
+`spent_usd` and accumulates across attempts.
+
+The slice is checked **before** a run, not during one. `MAX_TOOL_ROUNDS`
+already bounds a single turn, so the real risk is a job requeued over and over,
+and a cumulative total is what catches that.
+
+### The known rough edge
+
+**A job re-run after approval starts its turn over.** Whatever it did before
+parking, it does again. That's survivable because the actions that can't be
+taken twice are exactly the ones that stop and ask, and a grant is matched to
+exact arguments — but it's the strongest argument for persisting a job's
+transcript, which is what the next tier is for.
+
 ## Consolidation notes
 
 The sections above are in **build order**, not importance order — each records
@@ -1554,9 +1620,11 @@ and Mac control; and a consolidation pass.**
 Recorded so they're a decision rather than an oversight:
 
 - **Session trimming drops the old prefix rather than summarizing it.**
-- **Jobs are queued but never run.** The lifecycle and the approval queue are
-  built and tested; the executor that gives a job a model turn is the next
-  tier. Ada says so rather than implying otherwise.
+- **A job re-run after approval starts its turn over**, repeating whatever it
+  did before it parked. Safe because gated actions are the ones that stop and
+  ask, but it's why job transcripts are the next thing worth building.
+- **The executor has never run against a real model.** Every path is tested
+  against a faked `stream_turn`; nothing here has made a live API call.
 - **A denied approval cancels the whole job** rather than telling the model no
   and letting it try another way. Deliberate until the executor can resume a
   job mid-turn.

@@ -57,8 +57,11 @@ file has real jobs in it means migrating records that already exist.
   relevant subset today as an *optimization, never a capability limit*, which
   is right for conversation and exactly wrong for unattended work. This is
   where least privilege gets enforced instead of suggested.
-- `budget_usd` — this job's slice. `budget.per_day` is one global pool, so
-  without a slice one runaway job starves the conversation you're having.
+- `budget_usd` — this job's slice, spent against `spent_usd`. `budget.per_day`
+  is one global pool, so without a slice one runaway job starves the
+  conversation you're having. Checked before a run rather than during one:
+  `MAX_TOOL_ROUNDS` already bounds a single turn, so the real risk is a job
+  requeued over and over, and a cumulative total is what catches that.
 - `pending_approval` — the parked action from a confirmation nobody was there
   to answer. `confirm` blocks on a human at a terminal; at 3am there isn't
   one, and neither auto-approving `send_message` nor auto-denying it is a
@@ -182,6 +185,7 @@ def create(
             "run_at": run_at,
             "tools": tools,
             "budget_usd": budget_usd,
+            "spent_usd": 0.0,
             "pending_approval": None,
             "granted": None,
             "log": [],
@@ -381,6 +385,33 @@ def cancel(job_id: int, reason: str = "cancelled by the user") -> dict:
 def retry(job_id: int) -> dict:
     """Put a failed job back on the queue, attempts intact."""
     return _transition(job_id, PENDING, "requeued for another attempt", error=None, finished_at=None)
+
+
+def record_spend(job_id: int, amount: float) -> float:
+    """Add to what this job has cost, across every attempt. Returns the total.
+
+    Kept on the job rather than derived from the ledger: `budget.py` records
+    what Ada spent, not who spent it, and a job that fails and is retried has
+    to carry its earlier attempts with it or the cap never bites.
+    """
+    if amount <= 0:
+        job = get(job_id)
+        return job.get("spent_usd", 0.0) if job else 0.0
+
+    with _lock:
+        jobs = _load()
+        job = next((j for j in jobs if j["id"] == job_id), None)
+        if job is None:
+            return 0.0
+        job["spent_usd"] = job.get("spent_usd", 0.0) + float(amount)
+        _save(jobs)
+        return job["spent_usd"]
+
+
+def over_budget(job: dict) -> bool:
+    """Whether this job has already spent the slice it was given."""
+    cap = job.get("budget_usd")
+    return cap is not None and job.get("spent_usd", 0.0) >= cap
 
 
 # --- orphans ---------------------------------------------------------------

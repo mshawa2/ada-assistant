@@ -9,6 +9,7 @@ what guarantees a slow check can never overlap with itself or pile up runs.
 import threading
 import time
 
+from ada import jobs
 from ada.heartbeat import notices, singleton
 from ada.heartbeat.checks import CHECKS
 from ada.heartbeat.config import load_config
@@ -53,6 +54,19 @@ def start(stop_event: threading.Event) -> threading.Thread:
             flush=True,
         )
         return _idle_thread(stop_event)
+
+    # Whoever owns the heartbeat owns the executor, so this is where abandoned
+    # work is recovered: a job left `running` inside a process that died — a
+    # closed laptop, a crash — goes back on the queue before anything claims
+    # again. Safe to do here precisely because the lock above means one process
+    # is doing it.
+    recovered = jobs.reap_orphans()
+    if recovered:
+        print(
+            f"[heartbeat: put {len(recovered)} interrupted job"
+            f"{'s' if len(recovered) != 1 else ''} back on the queue]",
+            flush=True,
+        )
 
     # Run one catch-up pass synchronously before handing off to the background
     # thread, so anything overdue is already in the notice log by the time the

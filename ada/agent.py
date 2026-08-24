@@ -18,6 +18,7 @@ def run_turn(
     on_text: Callable[[str], None],
     on_status: Callable[[str], None],
     confirm: Callable[[Action], bool],
+    allowed_tools: list[str] | None = None,
 ) -> None:
     """Runs one full turn, including any tool calls, appending assistant/tool
     messages to `messages` in place.
@@ -26,6 +27,15 @@ def run_turn(
     order, as it streams in — this is what a caller should print and/or
     speak. `on_status` is called with human-readable status lines (which
     tool is running) that are for the console only, never spoken aloud.
+    `allowed_tools`, when given, is a hard boundary rather than a hint. A
+    conversation gets `None` and the usual routing, which is explicitly an
+    optimization and never a capability limit. A background job gets a list,
+    and then that list is the whole world: it decides what schemas are sent
+    *and* is checked again before any tool runs, because the first is only a
+    suggestion to a model and the second is the actual gate. Least privilege
+    for unattended work is the point — a job that summarizes notes has no
+    business being able to send anything.
+
     `confirm` is called with an `Action` — the tool, its arguments and a
     plain-language description — only for tools flagged in safety_config.json.
     It must return True before the tool actually runs.
@@ -36,15 +46,17 @@ def run_turn(
     `tool_use` block unanswered, so the caller must discard this turn's
     messages rather than persist them — the API rejects a dangling tool call.
     """
-    final_message = _stream(messages, on_text, on_status)
+    final_message = _stream(messages, on_text, on_status, allowed_tools)
 
     for _ in range(MAX_TOOL_ROUNDS):
         if final_message.stop_reason != "tool_use":
             messages.append({"role": "assistant", "content": final_message.content})
             return
         messages.append({"role": "assistant", "content": final_message.content})
-        messages.append({"role": "user", "content": _execute_tool_calls(final_message, on_status, confirm)})
-        final_message = _stream(messages, on_text, on_status)
+        messages.append(
+            {"role": "user", "content": _execute_tool_calls(final_message, on_status, confirm, allowed_tools)}
+        )
+        final_message = _stream(messages, on_text, on_status, allowed_tools)
 
     # Model kept calling tools past the round cap — close out the pending
     # tool_use blocks so the conversation stays valid, then stop.
@@ -58,10 +70,21 @@ def run_turn(
     messages.append({"role": "user", "content": cancelled})
 
 
-def _stream(messages: list[dict], on_text: Callable[[str], None], on_status: Callable[[str], None]):
-    # Routed, not the whole catalogue — see ada/routing.py. `find_tool` is
-    # always in the set, so a wrong guess costs a round trip, not a refusal.
-    tools = routing.relevant(messages, tool_specs())
+def _stream(
+    messages: list[dict],
+    on_text: Callable[[str], None],
+    on_status: Callable[[str], None],
+    allowed_tools: list[str] | None = None,
+):
+    if allowed_tools is None:
+        # Routed, not the whole catalogue — see ada/routing.py. `find_tool` is
+        # always in the set, so a wrong guess costs a round trip, not a refusal.
+        tools = routing.relevant(messages, tool_specs())
+    else:
+        # No routing and no `find_tool` escape hatch: a restricted job asking
+        # what else exists would only be shown things it still can't call.
+        permitted = set(allowed_tools)
+        tools = [spec for spec in tool_specs() if spec["name"] in permitted]
     status.set_armed(spec["name"] for spec in tools)
     gen = stream_turn(messages, tools=tools)
     try:
@@ -123,10 +146,30 @@ def _execute_tool_calls(
     final_message,
     on_status: Callable[[str], None],
     confirm: Callable[[Action], bool],
+    allowed_tools: list[str] | None = None,
 ) -> list[dict]:
     results = []
     for block in final_message.content:
         if block.type != "tool_use":
+            continue
+
+        if allowed_tools is not None and block.name not in allowed_tools:
+            # Checked here as well as when choosing what to send, because the
+            # first is a suggestion to a model and this is the boundary. A job
+            # cannot reach past its own tool list, however it got the name.
+            on_status(f"blocked: {block.name} isn't in this job's tools")
+            audit.log("tool_out_of_scope", tool=block.name, input=block.input)
+            results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": (
+                        f"The '{block.name}' tool isn't available to this background job. "
+                        "Work with the tools you have, or finish and say what you couldn't do."
+                    ),
+                    "is_error": True,
+                }
+            )
             continue
 
         if safety.is_denied(block.name):
