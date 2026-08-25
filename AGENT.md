@@ -2190,6 +2190,40 @@ running it against the real API:
 matters — a stop and an invalidation set by hand survive two consecutive syncs
 untouched.
 
+### What turning the sync on changed
+
+Enabling it exposed two things that were fine with hand-entered holdings and
+wrong with forty-six arriving at once.
+
+**A bare synced holding really is inert now.** `DEFAULT_TRAIL_PCT` is 15, so
+every position had a trailing rule whether or not you'd asked for one — which
+made both the sync message and `holdings_needing_rules`, each promising a
+holding "will never alert", into lies the moment a sync brought in a book.
+`is_managed()` is the fix: a holding starts alerting when you give it a stop, a
+target, an explicit trail, or an earnings date, and not before. Tracked, priced,
+shown, quiet.
+
+**Prices come from the broker.** `check_positions` would otherwise have asked a
+free price endpoint about forty-six symbols every five minutes — around 550
+requests an hour for numbers nobody had asked to be alerted about. SnapTrade
+returns a price in the same call that returns the share count, so the sync
+records it, and the five-minute check now prices only what could actually
+alert. With nothing managed yet that is **zero** outside calls.
+
+Enabled at a 900s interval. The default in `settings.py` stays off, so a
+deleted config can't start syncing a brokerage by accident.
+
+### The Accounts panel, and a book with a long tail
+
+Accounts show institution, masked number, cash, buying power, holdings count and
+"as of" — from the last sync, never a live call.
+
+Holdings needed two changes once real data arrived. The card now carries a
+**total and aggregate P&L**, because forty-six percentages and no total is not
+an answer to "how am I doing". And the sort was a no-op: closest-to-stop-first
+means nothing when nothing has a stop, so 0.036-share dust sat above real
+positions. It's managed-first, then by position value.
+
 ### A latent bug the tests found
 
 `ada.agent` imports the tool registry, the registry imports tools that import

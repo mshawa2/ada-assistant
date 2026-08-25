@@ -50,7 +50,12 @@ def check_positions(params: dict) -> None:
     if not params.get("ignore_market_hours") and not market_open():
         return
 
-    held = positions.load_positions()
+    # Only holdings that could actually alert. With a brokerage sync attached
+    # this is the difference between a handful of price lookups every five
+    # minutes and one per holding — forty-six of them, against a free endpoint
+    # that asks nothing of us. The rest are priced by the sync, which gets a
+    # price from the broker in the same call that gets the share count.
+    held = [p for p in positions.load_positions() if positions.is_managed(p)]
     if not held:
         return
 

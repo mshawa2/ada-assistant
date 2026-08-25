@@ -320,3 +320,68 @@ def test_an_absent_connection_never_looks_like_an_empty_portfolio(monkeypatch):
     assert brokerage.configured() is False
     with pytest.raises(brokerage.NotConnected):
         brokerage.accounts()
+
+
+# --- a bare synced holding is genuinely inert -------------------------------
+#
+# This became load-bearing the moment holdings started arriving by themselves.
+# Forty-six turning up from a sync is not forty-six decisions, and the default
+# trailing rule would have alerted on all of them — contradicting what both the
+# sync message and holdings_needing_rules promise.
+
+
+def test_a_holding_you_have_decided_nothing_about_never_alerts():
+    positions.merge_from_broker([{"symbol": "ACME", "shares": 20, "cost": 36.50}])
+    bare = positions.get("ACME")
+    positions.record_reading("ACME", 36.50)
+
+    # A 40% fall — well past the 15% default trail.
+    assert positions.evaluate(positions.get("ACME"), _reading(25)) == []
+    assert positions.is_managed(bare) is False
+
+
+def test_one_decision_is_enough_to_start_watching_it():
+    positions.merge_from_broker([{"symbol": "ACME", "shares": 20, "cost": 36.50}])
+    positions.record_reading("ACME", 36.50)
+    positions.update("ACME", trail_pct=15)
+
+    found = positions.evaluate(positions.get("ACME"), _reading(25))
+
+    assert [a["kind"] for a in found] == ["trail"]
+
+
+@pytest.mark.parametrize("field,value", [("stop", 10), ("target", 90), ("trail_pct", 20), ("earnings_on", 1.0)])
+def test_any_rule_makes_a_holding_managed(field, value):
+    assert positions.is_managed({field: value}) is True
+
+
+def test_nothing_set_is_not_managed():
+    assert positions.is_managed({"symbol": "X", "shares": 1, "cost": 2}) is False
+
+
+def test_the_check_only_prices_what_could_alert(monkeypatch, sent_notifications):
+    """With a sync attached this is the difference between a handful of price
+    lookups every five minutes and one per holding."""
+    priced = []
+    positions.merge_from_broker(
+        [{"symbol": "AAA", "shares": 1}, {"symbol": "BBB", "shares": 1}]
+    )
+    positions.update("BBB", stop=1)
+
+    monkeypatch.setattr(market, "read", lambda s: priced.append(s) or _reading(50))
+    monkeypatch.setattr(positions_check, "market_open", lambda now=None: True)
+
+    positions_check.check_positions({})
+
+    assert priced == ["BBB"], "the one with a rule, and only that one"
+
+
+def test_the_message_and_the_behaviour_agree():
+    """holdings_needing_rules says a bare holding 'will never alert'. That has
+    to be true, not nearly true."""
+    from ada.tools import portfolio_tool
+
+    positions.merge_from_broker([{"symbol": "ACME", "shares": 20}])
+
+    assert "never alert" in portfolio_tool.holdings_needing_rules()
+    assert positions.is_managed(positions.get("ACME")) is False

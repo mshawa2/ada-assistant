@@ -492,7 +492,7 @@ def test_holdings_come_from_stored_prices_not_a_live_fetch(client, monkeypatch):
     positions.add("NVDA", 10, cost=180, stop=165)
     positions.record_reading("NVDA", 200.0)
 
-    row = client.get("/api/positions").get_json()[0]
+    row = client.get("/api/positions").get_json()["holdings"][0]
 
     assert row["price"] == 200.0
     assert row["priced_at"] is not None, "the page has to be able to say when"
@@ -503,7 +503,7 @@ def test_a_holding_never_priced_is_shown_as_unpriced_not_as_zero(client):
 
     positions.add("NVDA", 10, cost=180, stop=165)
 
-    row = client.get("/api/positions").get_json()[0]
+    row = client.get("/api/positions").get_json()["holdings"][0]
 
     assert row["price"] is None
     assert row["pnl_pct"] is None
@@ -516,7 +516,7 @@ def test_a_holding_carries_the_room_left_before_each_rule_trips(client):
     positions.add("NVDA", 10, cost=180, stop=180, target=220)
     positions.record_reading("NVDA", 200.0)
 
-    row = client.get("/api/positions").get_json()[0]
+    row = client.get("/api/positions").get_json()["holdings"][0]
 
     assert row["to_stop_pct"] == pytest.approx(10.0)
     assert row["to_target_pct"] == pytest.approx(10.0)
@@ -532,7 +532,7 @@ def test_the_holding_closest_to_its_stop_is_listed_first(client):
     positions.add("CLOSE", 10, stop=195)
     positions.record_reading("CLOSE", 200.0)
 
-    listed = client.get("/api/positions").get_json()
+    listed = client.get("/api/positions").get_json()["holdings"]
 
     assert [r["symbol"] for r in listed] == ["CLOSE", "SAFE"]
 
@@ -544,4 +544,44 @@ def test_a_fired_alert_is_visible_on_the_holding(client):
     positions.record_reading("NVDA", 200.0)
     positions.set_fired("NVDA", "stop", True)
 
-    assert client.get("/api/positions").get_json()[0]["fired"] == ["stop"]
+    assert client.get("/api/positions").get_json()["holdings"][0]["fired"] == ["stop"]
+
+
+def test_the_holdings_endpoint_totals_the_book(client):
+    """Forty-six percentages and no total is not an answer to "how am I
+    doing"."""
+    from ada import positions
+
+    positions.merge_from_broker([{"symbol": "AAA", "shares": 10, "cost": 10}])
+    positions.record_reading("AAA", 12)
+    positions.merge_from_broker(
+        [{"symbol": "AAA", "shares": 10, "cost": 10}, {"symbol": "BBB", "shares": 5, "cost": 20}]
+    )
+    positions.record_reading("BBB", 20)
+
+    body = client.get("/api/positions").get_json()
+
+    assert body["value"] == pytest.approx(12 * 10 + 20 * 5)
+    assert body["pnl"] == pytest.approx((12 - 10) * 10 + 0)
+    assert body["managed"] == 0
+
+
+def test_holdings_you_manage_come_first_then_the_biggest(client):
+    """A sync brings a long tail — sorting by nothing put 0.03-share dust above
+    real positions."""
+    from ada import positions
+
+    positions.merge_from_broker([
+        {"symbol": "DUST", "shares": 0.03, "cost": 1},
+        {"symbol": "BIG", "shares": 100, "cost": 10},
+        {"symbol": "WATCHED", "shares": 1, "cost": 5},
+    ])
+    for symbol, price in (("DUST", 1), ("BIG", 10), ("WATCHED", 5)):
+        positions.record_reading(symbol, price)
+    positions.update("WATCHED", stop=4)
+
+    listed = [h["symbol"] for h in client.get("/api/positions").get_json()["holdings"]]
+
+    assert listed[0] == "WATCHED", "the one with a rule leads"
+    assert listed[1] == "BIG", "then by size"
+    assert listed[-1] == "DUST"

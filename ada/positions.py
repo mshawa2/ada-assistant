@@ -314,6 +314,25 @@ def set_fired(symbol: str, kind: str, fired: bool) -> None:
 # --- the rules --------------------------------------------------------------
 
 
+def is_managed(position: dict) -> bool:
+    """Whether you have actually decided anything about this holding.
+
+    This mattered the moment positions started arriving by themselves. Adding
+    one by hand is a decision; forty-six turning up from a brokerage sync is
+    not, and the default trailing rule would have alerted on all of them —
+    making `holdings_needing_rules` and the sync message, which both promise
+    a bare holding "will never alert", into lies.
+
+    A holding becomes managed when you give it a stop, a target, an explicit
+    trailing percentage, or an earnings date. Until then Ada tracks it, prices
+    it, shows it, and stays quiet about it.
+    """
+    return any(
+        position.get(field) is not None
+        for field in ("stop", "target", "trail_pct", "earnings_on")
+    )
+
+
 def evaluate(position: dict, reading: dict, now: float | None = None) -> list[dict]:
     """Which of this position's rules are true right now.
 
@@ -347,8 +366,11 @@ def evaluate(position: dict, reading: dict, now: float | None = None) -> list[di
             }
         )
 
+    # Only for a holding you've actually decided something about — see
+    # `is_managed`. The default would otherwise turn every synced position into
+    # an alert, which is exactly what the sync tells you won't happen.
     trail = position.get("trail_pct") or DEFAULT_TRAIL_PCT
-    if high_water and price < high_water:
+    if is_managed(position) and high_water and price < high_water:
         drop = (high_water - price) / high_water * 100
         if drop >= trail:
             found.append(

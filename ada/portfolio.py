@@ -187,6 +187,13 @@ def sync() -> dict:
     rows = [row for account in live["accounts"] for row in account["holdings"]]
 
     result = positions.merge_from_broker(rows, source=SOURCE)
+
+    # The broker hands back a price alongside the share count, so take it. That
+    # is one fewer reason to ask a free price endpoint about forty-six symbols
+    # every five minutes, and it comes from the same source as the shares.
+    for row in rows:
+        if row.get("price"):
+            positions.record_reading(row["symbol"], row["price"])
     result["accounts"] = live["accounts"]
     result["at"] = live["at"]
 

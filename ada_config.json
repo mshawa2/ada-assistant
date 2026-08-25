@@ -207,7 +207,7 @@
         "interval_seconds": 300
       },
       "sync_portfolio": {
-        "enabled": false,
+        "enabled": true,
         "interval_seconds": 900,
         "level": "urgent"
       }

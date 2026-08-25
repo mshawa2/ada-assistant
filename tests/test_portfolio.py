@@ -358,15 +358,19 @@ def test_a_disabled_connection_is_reported_as_needing_attention(monkeypatch, key
 # --- the heartbeat check ----------------------------------------------------
 
 
-def test_the_sync_check_is_off_by_default():
-    """It merges into the positions every alert runs on. Worth watching once
-    by hand before it runs while you're asleep."""
+def test_turning_the_sync_on_is_a_deliberate_act():
+    """It's on in the shipped config now, having been watched syncing by hand
+    first — which was the whole reason it shipped off. What matters is that it
+    stays an explicit setting rather than something a missing config turns on
+    by accident."""
     import json
     from pathlib import Path
 
     config = json.loads((Path(__file__).resolve().parent.parent / "ada_config.json").read_text())
+    check = config["heartbeat"]["checks"]["sync_portfolio"]
 
-    assert config["heartbeat"]["checks"]["sync_portfolio"]["enabled"] is False
+    assert check["enabled"] is True
+    assert check["interval_seconds"] >= 300, "a brokerage read is not a thing to do every minute"
 
 
 def test_the_sync_check_is_registered():

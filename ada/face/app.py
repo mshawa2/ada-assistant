@@ -248,12 +248,35 @@ def api_positions():
                 "to_target_pct": ((target - price) / price * 100) if price and target else None,
                 "invalidation": held.get("invalidation"),
                 "fired": sorted(held.get("fired", {})),
+                "managed": positions.is_managed(held),
+                "value": (price * held["shares"]) if price else None,
             }
         )
 
-    # Closest to its stop first: that's the one worth looking at.
-    rows.sort(key=lambda r: (r["to_stop_pct"] is None, r["to_stop_pct"] or 0))
-    return jsonify(rows)
+    # Two sorts, in the order a person looks for things. Anything you've set a
+    # rule on comes first, closest to its stop at the top — that's the one worth
+    # acting on. Everything else by size, because a brokerage sync brings a long
+    # tail: forty-six holdings running from 38 shares down to 0.036, and sorting
+    # them by nothing put the dust above the real positions.
+    rows.sort(
+        key=lambda r: (
+            not r["managed"],
+            r["to_stop_pct"] if r["managed"] and r["to_stop_pct"] is not None else 0,
+            -(r["value"] or 0),
+        )
+    )
+
+    priced = [r for r in rows if r["value"] is not None]
+    return jsonify(
+        {
+            "holdings": rows,
+            # The total is what someone opens this for. Without it the card is
+            # forty-six percentages and no answer to "how am I doing".
+            "value": sum(r["value"] for r in priced) or None,
+            "pnl": sum(r["pnl"] for r in rows if r["pnl"] is not None) or None,
+            "managed": sum(1 for r in rows if r["managed"]),
+        }
+    )
 
 
 @app.route("/api/usage")

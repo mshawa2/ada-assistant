@@ -556,11 +556,19 @@ function setStat(id, n, sub, hot = false, alert = false) {
 // page — see /api/positions. The "as of" is not decoration: outside market
 // hours it's the difference between a stale number and a lie.
 async function refreshHoldings() {
-  const list = await get("/api/positions");
-  if (!list) return;
+  const data = await get("/api/positions");
+  if (!data) return;
+  const list = data.holdings || [];
   $("holdings-card").style.display = list.length ? "" : "none";
-  $("v-holdings").textContent = list.length;
-  if (!changed("holdings", list)) return;
+
+  // The total is what someone actually opens this for. Without it the card is
+  // forty-six percentages and no answer to "how am I doing".
+  const total = data.value == null ? `${list.length}` :
+    `${money(data.value)}${data.pnl == null ? "" :
+      `  ·  <span class="pnl ${data.pnl >= 0 ? "up" : "down"}">${data.pnl >= 0 ? "+" : ""}${data.pnl.toFixed(2)}</span>`}`;
+  $("v-holdings").innerHTML = `${list.length} · ${total}`;
+
+  if (!changed("holdings", data)) return;
 
   $("holdings").innerHTML = list.map(h => {
     const fired = h.fired || [];
@@ -572,6 +580,7 @@ async function refreshHoldings() {
     const near = room != null && room <= 5;
 
     const legs = [];
+    if (h.value != null) legs.push(`<span>${money(h.value)}</span>`);
     if (h.stop != null) legs.push(`<span class="${hit ? "hit" : ""}">stop ${h.stop.toFixed(2)}${room != null ? ` (${room >= 0 ? room.toFixed(1) + "% above" : "breached"})` : ""}</span>`);
     if (h.target != null && h.to_target_pct != null) legs.push(`<span>target ${h.target.toFixed(2)} (${h.to_target_pct.toFixed(1)}% away)</span>`);
     if (h.priced_at) legs.push(`<span>as of ${esc(when(h.priced_at))}</span>`);
