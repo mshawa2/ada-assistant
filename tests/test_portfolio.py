@@ -232,3 +232,107 @@ def test_a_quiet_sync_says_so(broker):
     portfolio.sync()
 
     assert "Nothing changed" in portfolio.describe(portfolio.sync())
+
+
+# --- the tools --------------------------------------------------------------
+
+
+@pytest.fixture
+def keyed(monkeypatch):
+    monkeypatch.setenv(brokerage.CLIENT_ID_VAR, "test-client")
+    monkeypatch.setenv(brokerage.CONSUMER_KEY_VAR, "test-key")
+
+
+def test_no_portfolio_tool_can_move_money():
+    """The moment after a sync is exactly when someone asks 'so can you just
+    sell it then'."""
+    from ada.tools import specs
+
+    for spec in specs():
+        assert not spec["name"].startswith(("buy_", "sell_", "trade_", "order_", "place_"))
+
+    sync = next(s for s in specs() if s["name"] == "sync_portfolio")
+    assert "only ever reads" in sync["description"]
+    assert "cannot place, cancel or change an order" in sync["description"]
+
+
+def test_an_unconfigured_sync_explains_setup_rather_than_reporting_nothing(monkeypatch):
+    from ada.tools import portfolio_tool
+
+    monkeypatch.delenv(brokerage.CLIENT_ID_VAR, raising=False)
+    monkeypatch.delenv(brokerage.CONSUMER_KEY_VAR, raising=False)
+
+    out = portfolio_tool.sync_portfolio()
+
+    assert "snaptrade.com" in out
+    assert "tell ada what you hold" in out.lower()
+
+
+def test_a_brokerage_outage_says_nothing_was_changed(monkeypatch, keyed):
+    from ada.tools import portfolio_tool
+
+    def broken():
+        raise brokerage.BrokerageError("SnapTrade returned 503.")
+
+    monkeypatch.setattr(brokerage, "accounts", broken)
+
+    out = portfolio_tool.sync_portfolio()
+
+    assert "nothing was changed" in out
+    assert "503" in out
+
+
+def test_listing_accounts_reads_the_last_sync(broker, keyed):
+    from ada.tools import portfolio_tool
+
+    portfolio.sync()
+    out = portfolio_tool.list_accounts()
+
+    assert "Robinhood Individual" in out
+    assert "••••9012" in out
+    assert "cash 2,500.00" in out
+    assert "2 holdings" in out
+
+
+def test_listing_accounts_before_any_sync_says_what_to_do(keyed):
+    from ada.tools import portfolio_tool
+
+    assert "sync_portfolio" in portfolio_tool.list_accounts()
+
+
+def test_holdings_without_rules_are_named_as_inert():
+    from ada.tools import portfolio_tool
+
+    positions.merge_from_broker([_row("AAPL", 20, 300)])
+    positions.add("NVDA", 10, cost=180, stop=165, invalidation="capex cuts")
+
+    out = portfolio_tool.holdings_needing_rules()
+
+    assert "AAPL" in out
+    assert "no stop" in out
+    assert "never alert" in out
+    assert "NVDA" not in out, "it has both"
+
+
+def test_everything_configured_says_so():
+    from ada.tools import portfolio_tool
+
+    positions.add("NVDA", 10, cost=180, stop=165, invalidation="capex cuts")
+
+    assert "Every holding has" in portfolio_tool.holdings_needing_rules()
+
+
+def test_a_disabled_connection_is_reported_as_needing_attention(monkeypatch, keyed):
+    """A connection that has quietly gone stale looks exactly like a portfolio
+    that stopped changing."""
+    from ada.tools import portfolio_tool
+
+    monkeypatch.setattr(
+        brokerage, "connections",
+        lambda: [{"brokerage": {"name": "Robinhood"}, "disabled": True}],
+    )
+
+    out = portfolio_tool.connection_status()
+
+    assert "Robinhood" in out
+    assert "DISABLED" in out

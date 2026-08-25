@@ -78,6 +78,8 @@ _HINTS = {
     "approval": ["approve", "approval", "blocked", "permission"],
     "schedule": ["recurring", "repeat", "daily", "weekly", "automatically", "morning", "routine"],
     "position": ["stock", "shares", "portfolio", "holding", "bought", "sold", "ticker", "invested"],
+    "portfolio": ["sync", "brokerage", "robinhood", "account", "cash", "balance", "holdings"],
+    "accounts": ["brokerage", "robinhood", "cash", "buying", "balance"],
     "price": ["stock", "ticker", "shares", "trading", "market", "quote"],
     "analyze": ["stock", "ticker", "buy", "sell", "opinion", "thoughts", "worth"],
     "scan": ["market", "moving", "ideas", "opportunities", "news", "happening"],

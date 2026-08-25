@@ -42,7 +42,7 @@ can't be a daily sweep of a watchlist. It's for the position you're actually
 uneasy about.
 """
 
-from ada import agent, cost, positions
+from ada import cost, positions
 
 # Read-only research, and deliberately nothing gated. A debate about whether to
 # hold a stock has no business being able to email anyone, and the allowlist in
@@ -137,6 +137,13 @@ def run_role(prompt: str, on_status, tools: list[str]) -> str:
     nothing left to look up, and a turn that can search will search — spending
     money to fetch a headline it has already been handed.
     """
+    # Imported here, not at module scope, for the reason heartbeat/executor.py
+    # already documents: `ada.agent` imports the tool registry, and the registry
+    # imports the tools that import this file. Importing `ada.tools` before
+    # `ada.agent` would otherwise fail on a half-built module — which it did,
+    # from a test that touched the tools first.
+    from ada import agent
+
     messages = [{"role": "user", "content": prompt}]
     chunks: list[str] = []
     agent.run_turn(

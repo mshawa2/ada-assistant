@@ -148,6 +148,10 @@ DEFAULTS: dict[str, Any] = {
             # way a rate limit is the only real defence against.
             "analyze_ticker": {"per_minute": 1, "per_hour": 4, "per_day": 12},
             "market_scan": {"per_minute": 1, "per_hour": 8, "per_day": 24},
+            # Reads, not spends — the ceiling is politeness to SnapTrade
+            # rather than a safety rail.
+            "sync_portfolio": {"per_minute": 2, "per_hour": 20, "per_day": 200},
+            "account_activity": {"per_minute": 3, "per_hour": 30},
             "tradingagents_report": {"per_minute": 1, "per_hour": 3, "per_day": 8},
         },
     },

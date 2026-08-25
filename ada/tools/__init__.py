@@ -15,6 +15,7 @@ from ada.tools import (  # noqa: F401  imported for tool-registration side effec
     notes,
     notices,
     positions_tool,
+    portfolio_tool,
     purchasing,
     reminders,
     research_tool,

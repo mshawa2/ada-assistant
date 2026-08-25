@@ -238,3 +238,22 @@ def test_the_expensive_tools_say_what_they_cost():
     assert "$0.20" in priced["market_scan"]
     assert "check_price is instant and free" in priced["analyze_ticker"]
     assert "NOT counted against Ada's budget" in priced["tradingagents_report"]
+
+
+def test_the_tool_registry_can_be_imported_before_the_agent():
+    """`ada.agent` imports the tool registry, and the registry imports tools
+    that import `debate`. A module-level `from ada import agent` in debate.py
+    made `import ada.tools` fail on a half-built module whenever nothing had
+    imported the agent first — which a test doing exactly that found."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from ada.tools import specs; print(len(specs()))"],
+        capture_output=True,
+        text=True,
+        env={**__import__("os").environ, "ANTHROPIC_API_KEY": "test"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert int(result.stdout.strip()) > 0
