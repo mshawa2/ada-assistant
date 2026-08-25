@@ -304,6 +304,11 @@ def test_the_position_tools_are_registered():
 # --- the brokerage seam -----------------------------------------------------
 
 
+# The brokerage seam has its own file now — see tests/test_brokerage.py. What
+# stays here is the one rule that belongs to positions: an absent connection
+# must never be renderable as an empty portfolio.
+
+
 def test_an_absent_connection_never_looks_like_an_empty_portfolio(monkeypatch):
     """The same shape, opposite meanings — confusing them is how someone
     concludes they sold something."""
@@ -314,15 +319,4 @@ def test_an_absent_connection_never_looks_like_an_empty_portfolio(monkeypatch):
 
     assert brokerage.configured() is False
     with pytest.raises(brokerage.NotConnected):
-        brokerage.positions()
-
-
-def test_the_setup_help_says_what_to_do_next(monkeypatch):
-    from ada import brokerage
-
-    monkeypatch.delenv(brokerage.CLIENT_ID_VAR, raising=False)
-    help_text = brokerage.setup_help()
-
-    assert "snaptrade.com" in help_text
-    assert "never sees a password" in help_text
-    assert "tell ada what you hold" in help_text.lower(), "it says what still works meanwhile"
+        brokerage.accounts()

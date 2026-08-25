@@ -1,74 +1,233 @@
-"""Syncing holdings from a real brokerage, without holding the keys to it.
+"""Reading your brokerage accounts through SnapTrade, and only ever reading.
 
-Robinhood has no public API. The unofficial clients work by logging in with the
-user's password and MFA code, which means storing brokerage credentials on disk,
-breaking whenever the private API moves, and violating the terms the user
-agreed to — a combination that isn't worth a convenience.
+SnapTrade **Personal** is the model here: your brokerages are already connected
+in their dashboard, so there is no user to register, no `userSecret` to store,
+and no connection portal to run — those belong to the Commercial model. Two
+values from your API Key page are the whole of it, and they live in `.env`:
 
-**SnapTrade** is the sanctioned route: the user authorises read-only access
-through Robinhood's own OAuth, and Ada never sees a password. Two keys go in
-`.env`; the link step happens in a browser, once.
+    SNAPTRADE_CLIENT_ID
+    SNAPTRADE_CONSUMER_KEY
 
-This module is the seam. It is deliberately explicit about being unconfigured
-rather than silently returning nothing, because "no positions" and "I was never
-connected" look identical in a list and mean completely different things.
+## No SDK, on purpose
+
+The official client would add aiohttp, cryptography, frozendict, python-dateutil
+and urllib3. The thing it does that we need is one HMAC, and the algorithm is
+short and stable:
+
+    sig     = {"content": body or None, "path": path, "query": query}
+    content = json.dumps(sig, separators=(",", ":"), sort_keys=True)
+    header  = base64(hmac_sha256(consumer_key, content))
+
+So this is stdlib, like `market.py` and `weather.py`. Ada's dependency tree does
+not grow for a feature that is fundamentally one signed GET.
+
+## Read-only is enforced here, not promised
+
+SnapTrade's API includes `/accounts/{id}/trading/*`, and their own guide warns
+that a consumer key "may be able to trade where trading is enabled". So the key
+you gave Ada may well be able to place orders.
+
+`_READS` is an allowlist. `_get()` refuses anything not on it **before opening a
+socket**, and there is no `_post`. That's the guarantee: not that Ada chooses not
+to trade, but that she has no code path that could.
+
+## Not connected is not the same as nothing held
+
+Every read raises `NotConnected` rather than returning an empty list when there
+are no credentials. An empty portfolio and an absent connection are the same
+shape and opposite meanings, and confusing them is how someone concludes they
+sold something.
 """
 
+import hashlib
+import hmac
+import json
 import os
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from base64 import b64encode
 
 CLIENT_ID_VAR = "SNAPTRADE_CLIENT_ID"
 CONSUMER_KEY_VAR = "SNAPTRADE_CONSUMER_KEY"
-USER_ID_VAR = "SNAPTRADE_USER_ID"
-USER_SECRET_VAR = "SNAPTRADE_USER_SECRET"
+
+# The documented base. Overridable because the SDK's default host omits the
+# version prefix while every published example includes it — the first live
+# call settles it, and an env var means settling it doesn't need a code change.
+BASE_URL = os.environ.get("SNAPTRADE_BASE_URL", "https://api.snaptrade.com/api/v1")
 
 SIGNUP_URL = "https://snaptrade.com"
+TIMEOUT = 20
+
+# Every path Ada may request. Anything not here cannot be reached: there is no
+# code path to a POST, and `_get` checks membership before it builds a request.
+# Adding to this list is the deliberate act that widens what Ada can see.
+_READS = {
+    "/accounts",
+    "/accounts/{account_id}",
+    "/accounts/{account_id}/balances",
+    "/accounts/{account_id}/positions/all",
+    "/accounts/{account_id}/holdings",
+    "/accounts/{account_id}/orders",
+    "/accounts/{account_id}/recentOrders",
+    "/accounts/{account_id}/activities",
+    "/authorizations",
+}
 
 
 class NotConnected(Exception):
-    """No brokerage link is configured. Not an error — a state."""
+    """No SnapTrade credentials are configured. A state, not a failure."""
+
+
+class BrokerageError(Exception):
+    """The call was made and didn't work."""
 
 
 def configured() -> bool:
     return bool(os.environ.get(CLIENT_ID_VAR) and os.environ.get(CONSUMER_KEY_VAR))
 
 
-def linked() -> bool:
-    """Whether a *user* has been registered and linked, not just the app keys."""
-    return configured() and bool(os.environ.get(USER_ID_VAR) and os.environ.get(USER_SECRET_VAR))
-
-
 def setup_help() -> str:
-    """What's actually missing, said in the order it has to be done."""
-    if not configured():
-        return (
-            "No brokerage connection is set up. Ada reads holdings through SnapTrade, which "
-            f"uses Robinhood's own read-only authorisation — she never sees a password.\n\n"
-            f"1. Sign up at {SIGNUP_URL} and get a client id and consumer key.\n"
-            f"2. Put them in .env as {CLIENT_ID_VAR} and {CONSUMER_KEY_VAR}.\n"
-            "3. Restart Ada and ask to connect the brokerage — she'll give you a link to "
-            "authorise in the browser.\n\n"
-            "Until then, tell Ada what you hold and she'll track it just the same."
-        )
     return (
-        "SnapTrade keys are configured, but no account has been linked yet. Ask Ada to connect "
-        "the brokerage and authorise in the browser."
+        "No brokerage connection is set up. Ada reads holdings through SnapTrade "
+        "Personal — read-only, and she never sees a brokerage password.\n\n"
+        f"1. Sign up at {SIGNUP_URL} and connect your brokerage there.\n"
+        "2. On the API Key page, choose the developer / 'Build with AI' option.\n"
+        f"3. Put {CLIENT_ID_VAR} and {CONSUMER_KEY_VAR} in .env yourself — don't paste "
+        "them into a chat.\n"
+        "4. Restart Ada and ask her to sync.\n\n"
+        "Until then, tell Ada what you hold and she'll track it exactly the same."
     )
 
 
-def positions() -> list[dict]:
-    """Holdings from the linked brokerage.
+def _sign(path: str, query: str, body=None) -> str:
+    """The `Signature` header for one request.
 
-    Raises rather than returning an empty list when nothing is connected: an
-    empty portfolio and an absent connection are the same shape and opposite
-    meanings, and confusing them is how someone concludes they sold something.
+    Matches `snaptrade_client/request_after_hook.py` exactly: the separators and
+    `sort_keys` are load-bearing, because the server recomputes this byte for
+    byte. A space after a comma is a 401.
     """
-    if not linked():
+    signed = {"content": body if body else None, "path": path, "query": query}
+    content = json.dumps(signed, separators=(",", ":"), sort_keys=True)
+    digest = hmac.new(
+        os.environ[CONSUMER_KEY_VAR].encode(), content.encode(), hashlib.sha256
+    ).digest()
+    return b64encode(digest).decode()
+
+
+def _get(template: str, params: dict | None = None, **path_values):
+    """One signed, read-only GET.
+
+    `template` is the allowlist key with `{account_id}`-style placeholders, kept
+    separate from the filled-in path so the check is against a fixed set rather
+    than against whatever a caller happened to build.
+    """
+    if template not in _READS:
+        raise BrokerageError(
+            f"'{template}' isn't a path Ada may read. Only these are: "
+            f"{', '.join(sorted(_READS))}."
+        )
+    if not configured():
         raise NotConnected(setup_help())
 
-    # The HTTP client lands with the link flow. Raising here rather than
-    # returning [] keeps the same rule: never let "not connected" look like
-    # "nothing held".
-    raise NotConnected(
-        "Brokerage sync isn't built yet — the keys are set, but the link flow and the "
-        "read call still need writing. Tell Ada what you hold in the meantime."
+    path = template.format(**{k: urllib.parse.quote(str(v)) for k, v in path_values.items()})
+
+    # clientId and timestamp are part of the signed query, so they're built here
+    # rather than added later — signing one string and sending another is the
+    # single easiest way to get this wrong.
+    query_parts = {
+        "clientId": os.environ[CLIENT_ID_VAR],
+        "timestamp": str(int(time.time())),
+        **(params or {}),
+    }
+    query = urllib.parse.urlencode(sorted(query_parts.items()))
+
+    request = urllib.request.Request(
+        f"{BASE_URL}{path}?{query}",
+        method="GET",
+        headers={
+            "Signature": _sign(path, query),
+            "Accept": "application/json",
+            "User-Agent": "ada-assistant",
+        },
     )
+
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as e:
+        # The body carries SnapTrade's own explanation, which is far more use
+        # than the status alone. Never the request headers — those hold the
+        # signature.
+        detail = ""
+        try:
+            detail = json.loads(e.read()).get("detail", "")
+        except Exception:
+            pass
+        if e.code in (401, 403):
+            raise BrokerageError(
+                f"SnapTrade rejected the credentials ({e.code}). Check {CLIENT_ID_VAR} "
+                f"and {CONSUMER_KEY_VAR} in .env.{f' {detail}' if detail else ''}"
+            ) from e
+        raise BrokerageError(f"SnapTrade returned {e.code}.{f' {detail}' if detail else ''}") from e
+    except (urllib.error.URLError, OSError) as e:
+        raise BrokerageError(f"Couldn't reach SnapTrade ({e}).") from e
+    except json.JSONDecodeError as e:
+        raise BrokerageError("SnapTrade returned something unreadable.") from e
+
+
+# --- the reads --------------------------------------------------------------
+
+
+def accounts() -> list[dict]:
+    """Every connected account. The entry point for everything else."""
+    return _get("/accounts") or []
+
+
+def balances(account_id: str) -> list[dict]:
+    """Cash and buying power for one account."""
+    return _get("/accounts/{account_id}/balances", account_id=account_id) or []
+
+
+def holdings(account_id: str) -> dict:
+    """Positions, balances and account in one call — fewer round trips than
+    asking for each, and the shape the sync actually wants."""
+    return _get("/accounts/{account_id}/holdings", account_id=account_id) or {}
+
+
+def positions(account_id: str) -> list[dict]:
+    return _get("/accounts/{account_id}/positions/all", account_id=account_id) or []
+
+
+def recent_orders(account_id: str) -> list[dict]:
+    return _get("/accounts/{account_id}/recentOrders", account_id=account_id) or []
+
+
+def activities(account_id: str, start: str = "", end: str = "") -> list[dict]:
+    params = {}
+    if start:
+        params["startDate"] = start
+    if end:
+        params["endDate"] = end
+    return _get("/accounts/{account_id}/activities", params=params, account_id=account_id) or []
+
+
+def connections() -> list[dict]:
+    """Each brokerage link and whether it's still healthy.
+
+    Worth surfacing on its own: a connection that has quietly gone stale looks
+    exactly like a portfolio that stopped changing.
+    """
+    return _get("/authorizations") or []
+
+
+def mask(number: str | None) -> str:
+    """An account number reduced to something safe to put on a page.
+
+    The dashboard is loopback-only and unauthenticated. That's fine for state
+    Ada already holds; it is not a reason to render a full brokerage account
+    number into a browser.
+    """
+    text = str(number or "").strip()
+    return f"••••{text[-4:]}" if len(text) >= 4 else "••••"

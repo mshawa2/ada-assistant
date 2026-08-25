@@ -172,6 +172,111 @@ def remove(symbol: str) -> dict:
         return position
 
 
+# What a broker knows, and may therefore overwrite on every sync. Everything
+# else on a position is either your decision or Ada's bookkeeping, and a sync
+# has no business touching either.
+BROKER_OWNED = ("shares", "cost", "account_id", "source")
+
+
+def merge_from_broker(rows: list[dict], source: str = "snaptrade") -> dict:
+    """Fold the broker's view into Ada's, leaving your decisions alone.
+
+    `add()` replaces a whole record, which is right when you're telling Ada
+    about something for the first time and catastrophic on every sync after —
+    it would erase the stop you set last week, along with the thesis, the
+    invalidation, the high-water mark and the fired flags, silently, on a
+    schedule.
+
+    So only `BROKER_OWNED` fields move. What comes back is what changed, in the
+    terms a person cares about:
+
+    - `added`   — the broker reports it, Ada didn't know. Has no rules yet, so
+                  it is inert until you set them; the caller says so out loud.
+    - `updated` — share count or cost moved.
+    - `missing` — Ada tracks it, the broker no longer reports it. **Not
+                  deleted.** A sync that hiccups and drops a position carrying a
+                  stop would remove an alarm without telling anyone.
+    """
+    seen = {}
+    for row in rows:
+        symbol = (row.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        # One symbol can be held in several accounts. Ada tracks a symbol, not
+        # a lot, so the shares add up and the cost is share-weighted.
+        if symbol in seen:
+            existing = seen[symbol]
+            total = existing["shares"] + float(row.get("shares") or 0)
+            if existing.get("cost") and row.get("cost") and total:
+                existing["cost"] = (
+                    existing["cost"] * existing["shares"] + float(row["cost"]) * float(row["shares"])
+                ) / total
+            existing["shares"] = total
+            existing["account_id"] = "multiple"
+        else:
+            seen[symbol] = {
+                "shares": float(row.get("shares") or 0),
+                "cost": float(row["cost"]) if row.get("cost") not in (None, "") else None,
+                "account_id": row.get("account_id"),
+            }
+
+    added, updated = [], []
+
+    with _lock:
+        held = _load()
+        by_symbol = {p["symbol"]: p for p in held}
+
+        for symbol, incoming in seen.items():
+            position = by_symbol.get(symbol)
+
+            if position is None:
+                position = {
+                    "symbol": symbol,
+                    "shares": incoming["shares"],
+                    "cost": incoming["cost"],
+                    "stop": None,
+                    "target": None,
+                    "trail_pct": None,
+                    "thesis": "",
+                    "invalidation": "",
+                    "earnings_on": None,
+                    "high_water": None,
+                    "last_price": None,
+                    "priced_at": None,
+                    "account_id": incoming["account_id"],
+                    "source": source,
+                    "opened_at": time.time(),
+                    "fired": {},
+                }
+                held.append(position)
+                added.append(symbol)
+                continue
+
+            changed = (
+                abs(position.get("shares", 0) - incoming["shares"]) > 1e-9
+                or (incoming["cost"] is not None and position.get("cost") != incoming["cost"])
+            )
+            position["shares"] = incoming["shares"]
+            if incoming["cost"] is not None:
+                position["cost"] = incoming["cost"]
+            position["account_id"] = incoming["account_id"]
+            position["source"] = source
+            if changed:
+                updated.append(symbol)
+
+        # Only positions the broker owns can go missing. One you typed in
+        # yourself was never the broker's to report.
+        missing = [
+            p["symbol"]
+            for p in held
+            if p["symbol"] not in seen and p.get("source") == source
+        ]
+
+        _save(held)
+
+    return {"added": sorted(added), "updated": sorted(updated), "missing": sorted(missing)}
+
+
 def record_reading(symbol: str, price: float) -> dict:
     """Store the latest price and push the high-water mark up if it moved.
 
