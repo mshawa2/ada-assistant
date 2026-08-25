@@ -2157,6 +2157,39 @@ positions every alert runs on, which is worth watching once by hand before it
 runs while you're asleep. It reports new and vanished holdings only: a share
 count moving by itself is not news.
 
+### What the first live call corrected
+
+Four things, none of which the tests could have caught — every one came from
+running it against the real API:
+
+1. **`configured()` was False with the keys sitting in `.env`.** `brokerage.py`
+   read `os.environ` but nothing had loaded the file; that only happens as a
+   side effect of importing `ada.config`, which the REPL does via `llm.py`.
+   It calls `load_dotenv()` itself now — not `from ada import config`, because
+   that exits the process when `ANTHROPIC_API_KEY` is missing and reading a
+   balance has nothing to do with having a model key.
+2. **The signature must cover the path *as requested*, prefix and all.**
+   Signing `/accounts` while requesting `/api/v1/accounts` is a 401 reading
+   "Unable to verify signature sent", which doesn't say which half is wrong.
+   Both `url=/api/v1/accounts, sign=/api/v1/accounts` and
+   `url=/accounts, sign=/accounts` return 200; the mismatch is what fails.
+   **The test that was supposed to catch this was tautological** — it derived
+   the expected path by stripping `BASE_URL`, so it recomputed the same
+   mistake and passed. It now parses the request URL instead.
+3. **`/holdings` answers 410**, "no longer available for your account". It was
+   the obvious endpoint and it is dead; `/positions/all` plus `/balances`
+   replace it, and it returns `{"results": [...]}` rather than a bare list.
+4. **The ticker lives under `instrument`, not `symbol`**, and units and prices
+   arrive as strings. The fixture had guessed `{"symbol": {"symbol": "NVDA"}}`
+   — a shape the API never sends — so every test passed against fiction while
+   every real position would have looked new on every sync. The fixture is now
+   copied from a live probe, and an account total arriving as
+   `{"amount": ..., "currency": {...}}` put a dict into `float()`.
+
+**Verified live**: 2 connected accounts, 46 positions, and the check that
+matters — a stop and an invalidation set by hand survive two consecutive syncs
+untouched.
+
 ### A latent bug the tests found
 
 `ada.agent` imports the tool registry, the registry imports tools that import

@@ -58,12 +58,17 @@ def _symbol_of(holding: dict) -> str | None:
     unrecognised shape is deliberate — a position keyed by the wrong string
     would look like a new holding forever.
     """
-    symbol = holding.get("symbol")
-    if isinstance(symbol, str):
-        return symbol.strip().upper() or None
-    if isinstance(symbol, dict):
+    # Robinhood via /positions/all nests it under `instrument`; other shapes
+    # put it under `symbol`, sometimes a string and sometimes another dict.
+    # Tried in order rather than assumed, because the wrong key silently yields
+    # a position that looks new on every single sync.
+    for container in (holding.get("instrument"), holding.get("symbol"), holding):
+        if isinstance(container, str):
+            return container.strip().upper() or None
+        if not isinstance(container, dict):
+            continue
         for key in ("symbol", "raw_symbol", "rawSymbol", "ticker"):
-            value = symbol.get(key)
+            value = container.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip().upper()
             if isinstance(value, dict):
@@ -71,6 +76,24 @@ def _symbol_of(holding: dict) -> str | None:
                 if isinstance(inner, str) and inner.strip():
                     return inner.strip().upper()
     return None
+
+
+def _number(value) -> float | None:
+    """A broker's number, whatever it happens to be wrapped in.
+
+    They arrive as strings as often as floats, and sometimes as
+    `{"amount": 41230.19, "currency": {...}}` — an account total came back that
+    way and put a dict into `float()`. Unwrapping here rather than at each call
+    site keeps every reader honest about it.
+    """
+    if isinstance(value, dict):
+        value = value.get("amount", value.get("value"))
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _units(holding: dict) -> float:
@@ -82,6 +105,18 @@ def _units(holding: dict) -> float:
             except (TypeError, ValueError):
                 continue
     return 0.0
+
+
+def kind_of(holding: dict) -> str:
+    """stock, crypto, option — as the broker labels it.
+
+    Worth keeping: `market.py` prices a stock as `NVDA` and a crypto as
+    `BTC-USD`, so a position that doesn't say which will be looked up wrong.
+    """
+    instrument = holding.get("instrument")
+    if isinstance(instrument, dict):
+        return str(instrument.get("kind") or "stock").lower()
+    return "stock"
 
 
 def _cost(holding: dict) -> float | None:
@@ -107,12 +142,11 @@ def snapshot() -> dict:
         if not account_id:
             continue
 
-        data = brokerage.holdings(account_id)
-        balances = data.get("balances") or brokerage.balances(account_id)
+        balances = brokerage.balances(account_id)
         cash, power = _cash(balances if isinstance(balances, list) else [])
 
         rows = []
-        for holding in data.get("positions") or []:
+        for holding in brokerage.positions(account_id):
             symbol = _symbol_of(holding)
             if not symbol:
                 continue
@@ -121,7 +155,8 @@ def snapshot() -> dict:
                     "symbol": symbol,
                     "shares": _units(holding),
                     "cost": _cost(holding),
-                    "price": holding.get("price"),
+                    "price": _number(holding.get("price")),
+                    "kind": kind_of(holding),
                     "account_id": account_id,
                 }
             )
@@ -134,7 +169,7 @@ def snapshot() -> dict:
                 "number": brokerage.mask(account.get("number")),
                 "cash": cash,
                 "buying_power": power,
-                "total": float((account.get("balance") or {}).get("total") or 0) or None,
+                "total": _number((account.get("balance") or {}).get("total")),
                 "holdings": rows,
             }
         )

@@ -49,6 +49,19 @@ import urllib.parse
 import urllib.request
 from base64 import b64encode
 
+from dotenv import load_dotenv
+
+# Loaded here rather than relying on `ada.config` having been imported first.
+# It usually has been — the REPL reaches it through `llm.py` — but that is an
+# accident of import order, and this module read an empty environment and
+# reported "not connected" with the keys sitting in .env the whole time.
+#
+# Not `from ada import config`, deliberately: that exits the process when
+# ANTHROPIC_API_KEY is missing, and reading a brokerage balance has nothing to
+# do with having a model key. `load_dotenv` is idempotent and won't override a
+# variable already set in the environment.
+load_dotenv()
+
 CLIENT_ID_VAR = "SNAPTRADE_CLIENT_ID"
 CONSUMER_KEY_VAR = "SNAPTRADE_CONSUMER_KEY"
 
@@ -68,7 +81,6 @@ _READS = {
     "/accounts/{account_id}",
     "/accounts/{account_id}/balances",
     "/accounts/{account_id}/positions/all",
-    "/accounts/{account_id}/holdings",
     "/accounts/{account_id}/orders",
     "/accounts/{account_id}/recentOrders",
     "/accounts/{account_id}/activities",
@@ -133,6 +145,12 @@ def _get(template: str, params: dict | None = None, **path_values):
 
     path = template.format(**{k: urllib.parse.quote(str(v)) for k, v in path_values.items()})
 
+    # The signature covers the path *as requested*, prefix and all. Signing
+    # "/accounts" while requesting "/api/v1/accounts" is a 401 reading "Unable
+    # to verify signature sent", and it is not obvious from that message which
+    # of the two halves is wrong. Verified against the live API both ways.
+    signed_path = urllib.parse.urlsplit(BASE_URL).path + path
+
     # clientId and timestamp are part of the signed query, so they're built here
     # rather than added later — signing one string and sending another is the
     # single easiest way to get this wrong.
@@ -147,7 +165,7 @@ def _get(template: str, params: dict | None = None, **path_values):
         f"{BASE_URL}{path}?{query}",
         method="GET",
         headers={
-            "Signature": _sign(path, query),
+            "Signature": _sign(signed_path, query),
             "Accept": "application/json",
             "User-Agent": "ada-assistant",
         },
@@ -190,14 +208,21 @@ def balances(account_id: str) -> list[dict]:
     return _get("/accounts/{account_id}/balances", account_id=account_id) or []
 
 
-def holdings(account_id: str) -> dict:
-    """Positions, balances and account in one call — fewer round trips than
-    asking for each, and the shape the sync actually wants."""
-    return _get("/accounts/{account_id}/holdings", account_id=account_id) or {}
-
-
 def positions(account_id: str) -> list[dict]:
-    return _get("/accounts/{account_id}/positions/all", account_id=account_id) or []
+    """Everything held in one account.
+
+    `/holdings` would have returned positions and balances together, and was
+    the obvious choice — it answers 410 "no longer available for your account".
+    Live probing, not the docs, is what said so.
+
+    The response is `{"results": [...], "data_freshness": ...}` rather than a
+    bare list, so the unwrapping happens here: a caller that got a dict where it
+    expected a list would iterate its keys and find nothing, silently.
+    """
+    payload = _get("/accounts/{account_id}/positions/all", account_id=account_id)
+    if isinstance(payload, dict):
+        return payload.get("results") or []
+    return payload or []
 
 
 def recent_orders(account_id: str) -> list[dict]:

@@ -101,15 +101,31 @@ def test_the_signature_is_sent_as_a_header_and_never_in_the_url(keyed, http):
     assert "test-consumer-key" not in http["url"], "the secret never travels in a query string"
 
 
-def test_what_is_signed_is_what_is_sent(keyed, http):
-    """Signing one string and sending another is the easiest way to get this
-    wrong, and it fails as an opaque 401."""
+def test_what_is_signed_is_the_path_actually_requested(keyed, http):
+    """The first version of this test derived the expected path by stripping
+    BASE_URL, so it recomputed the same mistake the code made and passed while
+    the live API returned 401. The path now comes out of the request URL by
+    parsing it, which is independent of how the code built it."""
+    import urllib.parse
+
     brokerage.accounts()
 
-    path_and_query = http["url"].split(brokerage.BASE_URL, 1)[1]
-    path, query = path_and_query.split("?", 1)
+    parts = urllib.parse.urlsplit(http["url"])
 
-    assert http["headers"]["Signature"] == brokerage._sign(path, query)
+    assert parts.path.startswith("/api/v1/"), "the version prefix is part of the request"
+    assert http["headers"]["Signature"] == brokerage._sign(parts.path, parts.query)
+
+
+def test_the_signed_path_includes_the_base_prefix(keyed, http):
+    """Verified against the live API: signing '/accounts' while requesting
+    '/api/v1/accounts' is a 401, and the message doesn't say which half is
+    wrong."""
+    import urllib.parse
+
+    brokerage.accounts()
+    parts = urllib.parse.urlsplit(http["url"])
+
+    assert brokerage._sign(parts.path, parts.query) != brokerage._sign("/accounts", parts.query)
 
 
 def test_the_client_id_and_timestamp_are_in_the_signed_query(keyed, http):
@@ -163,7 +179,6 @@ def test_the_allowlist_is_checked_before_credentials_are(monkeypatch, http):
     [
         lambda: brokerage.accounts(),
         lambda: brokerage.balances("a"),
-        lambda: brokerage.holdings("a"),
         lambda: brokerage.positions("a"),
         lambda: brokerage.recent_orders("a"),
         lambda: brokerage.activities("a"),

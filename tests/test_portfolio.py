@@ -151,19 +151,36 @@ def test_cash_sums_across_currencies():
 
 @pytest.fixture
 def broker(monkeypatch):
+    """The shape SnapTrade actually returns, taken from a live probe.
+
+    Numbers are invented; the *structure* is not. The first version of this
+    fixture guessed `{"symbol": {"symbol": "NVDA"}}` and every test passed
+    against a shape the API never sends — the ticker really lives under
+    `instrument`, and units and prices arrive as strings.
+    """
     state = {
         "accounts": [{"id": "acct-1", "name": "Robinhood Individual", "number": "123456789012"}],
-        "holdings": {
-            "balances": [{"cash": 2500.0, "buying_power": 5000.0}],
-            "positions": [
-                {"symbol": {"symbol": "NVDA"}, "units": 12, "average_purchase_price": 190.0},
-                {"symbol": {"symbol": "AAPL"}, "units": 20, "average_purchase_price": 300.0},
-            ],
-        },
+        "balances": [{"currency": {"code": "USD"}, "cash": 2500.0, "buying_power": 5000.0}],
+        "positions": [
+            {
+                "instrument": {"kind": "stock", "symbol": "NVDA", "raw_symbol": "NVDA"},
+                "units": "12",
+                "price": "208.48",
+                "cost_basis": "190.0",
+                "currency": "USD",
+            },
+            {
+                "instrument": {"kind": "stock", "symbol": "AAPL", "raw_symbol": "AAPL"},
+                "units": "20",
+                "price": "310.34",
+                "cost_basis": "300.0",
+                "currency": "USD",
+            },
+        ],
     }
     monkeypatch.setattr(brokerage, "accounts", lambda: state["accounts"])
-    monkeypatch.setattr(brokerage, "holdings", lambda account_id: state["holdings"])
-    monkeypatch.setattr(brokerage, "balances", lambda account_id: state["holdings"]["balances"])
+    monkeypatch.setattr(brokerage, "positions", lambda account_id: state["positions"])
+    monkeypatch.setattr(brokerage, "balances", lambda account_id: state["balances"])
     return state
 
 
@@ -220,7 +237,7 @@ def test_new_holdings_are_reported_as_inert_until_you_set_rules(broker):
 
 def test_a_missing_holding_is_reported_as_a_question_not_a_deletion(broker):
     portfolio.sync()
-    broker["holdings"]["positions"] = []
+    broker["positions"] = []
 
     text = portfolio.describe(portfolio.sync())
 
@@ -416,7 +433,7 @@ def test_a_share_count_moving_on_its_own_is_not_news(monkeypatch, broker, keyed,
     for notice in notices.list_notices():
         notices.dismiss_notice(notice["id"])
 
-    broker["holdings"]["positions"][0]["units"] = 15
+    broker["positions"][0]["units"] = "15"
     sync_check.check_sync({})
 
     assert notices.list_notices() == [], "an updated position is not worth interrupting for"
@@ -432,7 +449,7 @@ def test_a_vanished_holding_is_raised_as_a_possible_sync_fault(
     for notice in notices.list_notices():
         notices.dismiss_notice(notice["id"])
 
-    broker["holdings"]["positions"] = []
+    broker["positions"] = []
     sync_check.check_sync({})
 
     text = notices.list_notices()[0]["text"]
@@ -463,3 +480,58 @@ def test_the_accounts_endpoint_before_any_sync_is_empty_not_broken():
 
     assert body["accounts"] == []
     assert body["at"] is None
+
+
+# --- shapes taken from a live probe, not guessed -----------------------------
+
+
+def test_the_ticker_is_found_where_robinhood_actually_puts_it():
+    """Under `instrument`, not `symbol`. The first version of _symbol_of only
+    looked at `symbol`, so every real position would have looked new on every
+    single sync — and the unit tests passed, because they used a shape the API
+    never sends."""
+    live = {
+        "instrument": {"kind": "stock", "symbol": "ACME", "raw_symbol": "ACME"},
+        "units": "20.5",
+        "price": "14.20",
+        "cost_basis": "18.405",
+    }
+
+    assert portfolio._symbol_of(live) == "ACME"
+    assert portfolio._units(live) == pytest.approx(20.5)
+    assert portfolio._cost(live) == pytest.approx(18.405)
+    assert portfolio.kind_of(live) == "stock"
+
+
+def test_crypto_is_labelled_so_it_can_be_priced_correctly():
+    """market.py prices a stock as NVDA and a crypto as BTC-USD. A position
+    that doesn't say which gets looked up wrong."""
+    assert portfolio.kind_of({"instrument": {"kind": "crypto", "symbol": "BTC"}}) == "crypto"
+    assert portfolio.kind_of({"symbol": "NVDA"}) == "stock"
+
+
+def test_positions_all_is_unwrapped_from_its_envelope(monkeypatch):
+    """It returns {"results": [...], "data_freshness": ...}, not a list. A
+    caller handed the dict would iterate its keys and find nothing."""
+    monkeypatch.setattr(
+        brokerage, "_get",
+        lambda template, **kw: {"results": [{"instrument": {"symbol": "NVDA"}}], "data_freshness": {}},
+    )
+
+    assert brokerage.positions("acct-1") == [{"instrument": {"symbol": "NVDA"}}]
+
+
+def test_the_dead_holdings_endpoint_is_gone():
+    """It answers 410 'no longer available for your account'. Live probing
+    said so; the docs did not."""
+    assert not hasattr(brokerage, "holdings")
+    assert not any("holdings" in path for path in brokerage._READS)
+
+
+def test_a_number_wrapped_in_a_currency_object_is_still_a_number():
+    """An account total came back as {"amount": ..., "currency": {...}} and
+    put a dict into float()."""
+    assert portfolio._number({"amount": 41230.19, "currency": {"code": "USD"}}) == pytest.approx(41230.19)
+    assert portfolio._number("14.20") == pytest.approx(14.20)
+    assert portfolio._number({"currency": {"code": "USD"}}) is None
+    assert portfolio._number(None) is None
