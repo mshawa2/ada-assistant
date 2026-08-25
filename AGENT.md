@@ -2224,6 +2224,34 @@ an answer to "how am I doing". And the sort was a no-op: closest-to-stop-first
 means nothing when nothing has a stop, so 0.036-share dust sat above real
 positions. It's managed-first, then by position value.
 
+### Holdings, once there were forty-six of them
+
+A list was the right shape for holdings you typed in one at a time. It is the
+wrong shape for a synced book with a long tail, where the single most important
+fact — **a third of the account in one position** — is invisible among
+forty-six rows of percentages.
+
+**An allocation strip**, every holding to scale, warm at the top and cooling
+down the order so size reads as colour as well as width. Anything under 2%
+collapses into "36 others", which is itself the finding: ten holdings are 69% of
+the book and thirty-six share the rest.
+
+**Sparklines**, but only for the top twelve. Below that a holding is worth a few
+dollars and nobody is reading the line. `market.history()` caches daily closes
+for six hours in `data/price_history.json` — without it, drawing a line on
+forty-six rows would mean forty-six requests every time a tab was refreshed, to
+a free service, for something that moves once a day. A failed lookup is cached
+as a failure so a delisted ticker isn't retried on every poll.
+
+Each row gains its **share of the book**, which is the number that actually
+governs risk, and the totals moved into the card header.
+
+**A P&L bar was built and then removed.** Scaled to the extremes it was
+useless — one holding up 460% made every other bar an invisible sliver — and
+capped it merely restated the coloured percentage an inch to its right while
+competing with the stop rail, which carries information nothing else does. The
+sparkline earns the space; a second bar did not.
+
 ### A latent bug the tests found
 
 `ada.agent` imports the tool registry, the registry imports tools that import

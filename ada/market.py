@@ -21,9 +21,12 @@ arithmetic against a number you chose, not a prediction.
 """
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from ada import store
 
 _CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 _TIMEOUT = 12
@@ -153,6 +156,47 @@ def read(symbol: str) -> dict:
     data["from_year_high_pct"] = pct(price, data.get("year_high"))
     data["above_sma50_pct"] = pct(price, data["sma50"])
     return data
+
+
+# A day of closes doesn't change during a day, so it's fetched once and kept.
+# Without this, drawing a sparkline on each of forty-six holdings would mean
+# forty-six requests every time a dashboard tab was refreshed, to a free service
+# that asks nothing of us, for a line that moves once a day.
+_HISTORY = store.DATA_DIR / "price_history.json"
+_history_lock = store.lock_for(_HISTORY)
+HISTORY_TTL = 6 * 3600
+
+
+def history(symbol: str, days: int = 90) -> list[float]:
+    """Recent daily closes for a sparkline, cached.
+
+    Returns an empty list rather than raising: a missing line is a cosmetic
+    problem, and a dashboard that 500s because one ticker didn't resolve is a
+    worse one.
+    """
+    symbol = (symbol or "").strip().upper()
+    if not symbol:
+        return []
+
+    now = time.time()
+    with _history_lock:
+        cache = store.read_json(_HISTORY, {})
+        entry = cache.get(symbol)
+        if entry and now - entry.get("at", 0) < HISTORY_TTL:
+            return entry.get("closes", [])[-days:]
+
+    try:
+        closes = quote(symbol, span="6mo")["closes"]
+    except MarketError:
+        # Remembered as a failure so a delisted or misspelled ticker isn't
+        # retried on every single poll.
+        closes = []
+
+    with _history_lock:
+        cache = store.read_json(_HISTORY, {})
+        cache[symbol] = {"at": now, "closes": closes[-days:]}
+        store.write_json(_HISTORY, cache)
+    return closes[-days:]
 
 
 def describe(reading: dict) -> str:

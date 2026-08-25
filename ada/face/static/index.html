@@ -185,6 +185,30 @@ button.ghost { padding: 5px 9px; font-size: 11px; color: var(--dim); }
 .gauge.over .bar i { background: var(--down); }
 
 /* --- holdings ------------------------------------------------------------- */
+
+/* Allocation. One strip, every holding to scale. With a third of a book in a
+   single name, this says in one glance what forty-six rows of percentages
+   never manage to. */
+.alloc { display: flex; height: 34px; border-radius: 8px; overflow: hidden; gap: 2px; margin-bottom: 4px; }
+.alloc i {
+  display: block; height: 100%; position: relative; cursor: default;
+  transition: filter .15s ease;
+}
+.alloc i:hover { filter: brightness(1.45); }
+.alloc i span {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font: 600 9.5px/1 var(--mono); letter-spacing: .04em; color: #100a04;
+  overflow: hidden; white-space: nowrap;
+}
+.alloc-key { display: flex; flex-wrap: wrap; gap: 4px 14px; font: 10px/1.6 var(--mono); color: var(--dimmer); margin-bottom: 14px; }
+.alloc-key b { color: var(--text); font-weight: 600; }
+.alloc-key em { font-style: normal; color: var(--dim); }
+
+/* A holding's own line. Deliberately unlabelled — it's for the shape, and the
+   numbers next to it are the precise version. */
+.spark { width: 68px; height: 22px; flex: none; opacity: .85; }
+.spark svg { display: block; width: 100%; height: 100%; }
+
 .pnl { font-variant-numeric: tabular-nums; font-weight: 600; }
 .pnl.up { color: var(--up); }
 .pnl.down { color: var(--down); }
@@ -192,7 +216,7 @@ button.ghost { padding: 5px 9px; font-size: 11px; color: var(--dim); }
 /* How much room is left before a rule trips. The bar fills as the price
    approaches the stop, so a full bar is the thing you'd want to notice from
    across the room. */
-.rail { height: 3px; border-radius: 99px; background: var(--panel-2); margin-top: 6px; overflow: hidden; }
+.rail { height: 4px; border-radius: 99px; background: var(--panel-2); margin-top: 7px; max-width: 220px; overflow: hidden; }
 .rail i { display: block; height: 100%; border-radius: 99px; background: var(--dimmer); }
 .rail.near i { background: var(--warn); }
 .rail.hit i { background: var(--down); }
@@ -299,7 +323,11 @@ button.ghost { padding: 5px 9px; font-size: 11px; color: var(--dim); }
 
     <section class="card" id="holdings-card" style="display:none">
       <header><h2>Holdings</h2><span class="count" id="v-holdings">0</span></header>
-      <div class="body scroll" id="holdings"></div>
+      <div class="body">
+        <div class="alloc" id="alloc"></div>
+        <div class="alloc-key" id="alloc-key"></div>
+      </div>
+      <div class="body scroll" style="padding-top:0" id="holdings"></div>
     </section>
 
     <section class="card">
@@ -555,6 +583,49 @@ function setStat(id, n, sub, hot = false, alert = false) {
 // Prices here are whatever the heartbeat last stored, never fetched by this
 // page — see /api/positions. The "as of" is not decoration: outside market
 // hours it's the difference between a stale number and a lie.
+// A holding's own price line. No axes, no labels — it's there for the shape,
+// and the numbers beside it are the precise version.
+function sparkline(closes) {
+  if (!closes || closes.length < 3) return "";
+  const W = 68, H = 22, pad = 2;
+  const lo = Math.min(...closes), hi = Math.max(...closes);
+  const span = hi - lo || 1;
+  const step = (W - pad * 2) / (closes.length - 1);
+  const pts = closes.map((c, i) => [pad + i * step, H - pad - ((c - lo) / span) * (H - pad * 2)]);
+  const d = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join("");
+  const rising = closes[closes.length - 1] >= closes[0];
+  const stroke = rising ? "#4ade80" : "#f87171";
+  return `<div class="spark"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <path d="${d}" fill="none" stroke="${stroke}" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg></div>`;
+}
+
+// Every holding to scale in one strip. A third of a book in one name is the
+// most important fact about it, and a list of percentages hides that.
+function allocation(list, total) {
+  if (!total) return;
+  const sorted = [...list].filter(h => h.value).sort((a, b) => b.value - a.value);
+  const big = sorted.filter(h => h.value / total >= 0.02);
+  const rest = sorted.filter(h => h.value / total < 0.02);
+  const restValue = rest.reduce((a, h) => a + h.value, 0);
+
+  const segments = big.map((h, i) => ({
+    label: h.symbol, value: h.value,
+    // Warm at the top, cooling down the order — size reads as colour too.
+    color: `hsl(${24 + i * 7} ${78 - i * 4}% ${58 - i * 2}%)`,
+  }));
+  if (restValue) segments.push({label: `${rest.length} others`, value: restValue, color: "#3a3a42"});
+
+  $("alloc").innerHTML = segments.map(s => {
+    const pct = s.value / total * 100;
+    return `<i style="width:${pct.toFixed(2)}%;background:${s.color}" title="${esc(s.label)} ${pct.toFixed(1)}%">${
+      pct >= 7 ? `<span>${esc(s.label)}</span>` : ""}</i>`;
+  }).join("");
+
+  $("alloc-key").innerHTML = segments.slice(0, 8).map(s =>
+    `<span><b>${esc(s.label)}</b> <em>${(s.value / total * 100).toFixed(1)}%</em></span>`).join("");
+}
+
 async function refreshHoldings() {
   const data = await get("/api/positions");
   if (!data) return;
@@ -570,6 +641,7 @@ async function refreshHoldings() {
 
   if (!changed("holdings", data)) return;
 
+  allocation(list, data.value);
   $("holdings").innerHTML = list.map(h => {
     const fired = h.fired || [];
     const hit = fired.includes("stop");
@@ -581,6 +653,7 @@ async function refreshHoldings() {
 
     const legs = [];
     if (h.value != null) legs.push(`<span>${money(h.value)}</span>`);
+    if (h.managed && h.stop == null) legs.push(`<span>watched</span>`);
     if (h.stop != null) legs.push(`<span class="${hit ? "hit" : ""}">stop ${h.stop.toFixed(2)}${room != null ? ` (${room >= 0 ? room.toFixed(1) + "% above" : "breached"})` : ""}</span>`);
     if (h.target != null && h.to_target_pct != null) legs.push(`<span>target ${h.target.toFixed(2)} (${h.to_target_pct.toFixed(1)}% away)</span>`);
     if (h.priced_at) legs.push(`<span>as of ${esc(when(h.priced_at))}</span>`);
@@ -589,14 +662,16 @@ async function refreshHoldings() {
     const pnl = h.pnl_pct == null ? "" :
       `<span class="pnl ${h.pnl_pct >= 0 ? "up" : "down"}">${h.pnl_pct >= 0 ? "+" : ""}${h.pnl_pct.toFixed(1)}%</span>`;
 
+    const share = data.value ? ` · ${(h.value / data.value * 100).toFixed(1)}% of book` : "";
     return `
       <div class="row">
-        <div class="icon">${hit ? "!" : "$"}</div>
+        <div class="icon">${hit ? "!" : (h.managed ? "◆" : "$")}</div>
         <div class="body">
-          <div class="t">${esc(h.symbol)} &middot; ${h.shares}${h.price != null ? ` @ ${h.price.toFixed(2)}` : ""}</div>
+          <div class="t">${esc(h.symbol)} <span style="color:var(--dimmer);font-weight:400">${h.shares} @ ${h.price != null ? h.price.toFixed(2) : "—"}${esc(share)}</span></div>
           <div class="legs">${legs.join("")}</div>
           ${fill == null ? "" : `<div class="rail ${hit ? "hit" : near ? "near" : ""}"><i style="width:${fill.toFixed(0)}%"></i></div>`}
         </div>
+        ${sparkline(h.spark)}
         <div class="right">
           ${pnl}
           <div class="ago">${h.pnl == null ? "" : (h.pnl >= 0 ? "+" : "") + h.pnl.toFixed(2)}</div>

@@ -28,7 +28,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from ada import approvals, audit, budget, cost, jobs, portfolio, positions, recap, schedules, session, status
+from ada import approvals, audit, budget, cost, jobs, market, portfolio, positions, recap, schedules, session, status
 from ada.heartbeat.kill_switch import is_paused, set_paused
 from ada.heartbeat.notices import dismiss_notice, list_notices
 from ada.tools import specs as tool_specs
@@ -213,6 +213,27 @@ def api_accounts():
     )
 
 
+# How many holdings get a sparkline. Beyond this they're a few dollars each and
+# nobody is reading the line.
+SPARK_LIMIT = 12
+
+
+def _downsample(closes: list[float], points: int) -> list[float]:
+    """Thin a series to roughly `points` values, keeping the last one.
+
+    The last close is the one the eye lands on, so it survives regardless of
+    where the stride happens to fall.
+    """
+    if not closes:
+        return []
+    if len(closes) <= points:
+        return [round(c, 4) for c in closes]
+    stride = len(closes) / points
+    picked = [closes[int(i * stride)] for i in range(points)]
+    picked[-1] = closes[-1]
+    return [round(c, 4) for c in picked]
+
+
 @app.route("/api/positions")
 def api_positions():
     """Holdings, from what the heartbeat last stored — never a live fetch.
@@ -265,6 +286,14 @@ def api_positions():
             -(r["value"] or 0),
         )
     )
+
+    # Sparklines only for the ones anyone will actually look at. The cache in
+    # market.history means at most one fetch per symbol per six hours, and
+    # capping it here means a long tail of fractional holdings never triggers
+    # a fetch at all.
+    for row in rows[:SPARK_LIMIT]:
+        closes = market.history(row["symbol"], days=90)
+        row["spark"] = _downsample(closes, 40)
 
     priced = [r for r in rows if r["value"] is not None]
     return jsonify(
