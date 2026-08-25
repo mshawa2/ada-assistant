@@ -15,7 +15,7 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-68 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+71 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
@@ -35,6 +35,7 @@ depending on the arguments (a lock, not a lamp). Everything else runs freely.
 | Approvals | `list_approvals`, `resolve_approval` ⚠️ |
 | Recurring work | `list_schedules`, `manage_schedule`, `schedule_job` |
 | Holdings | `add_position`, `check_price`, `list_positions`, `remove_position`, `review_holding`, `update_position` |
+| Market research | `analyze_ticker`, `market_scan`, `tradingagents_report` |
 | Ada herself | `dismiss_notice`, `find_tool`, `get_settings`, `heartbeat`, `list_modes`, `list_notices`, `set_mode`, `set_setting` ⚠️ |
 
 ## How Ada is held back
@@ -2014,6 +2015,77 @@ first.
 before the first real run corrected it. At that price this is for a position
 you're uneasy about, not a daily watchlist sweep, and it's rate-limited to one
 a minute and twenty a day.
+
+## The analyst team, and TradingAgents kept at arm's length (built)
+
+The user asked three times for TradingAgents and for actual buy-side
+recommendations. Twice I argued against both. The third time is a decision, not
+a question, so this builds it — and having argued the point, the honest thing
+was to go and get facts instead of repeating an opinion.
+
+**It installs cleanly on Python 3.14.** Verified in an isolated venv, not
+assumed. It pulls **111 packages** — langgraph, four LangChain provider SDKs,
+pandas, numpy, openai, google-genai, redis, backtrader. Ada's tree is 41.
+
+So it runs in **its own virtualenv, as a subprocess** (`ada/tradingagents.py`,
+`scripts/install_tradingagents.sh`, installed to `~/.ada/tradingagents`).
+Nothing there can break `import ada`, an upgrade on either side can't disturb
+the other, and removing it is one directory. A test asserts the package is *not*
+importable from inside Ada.
+
+### The native path is the better default
+
+`ada/analyst.py` is the same architecture over Ada's own agent core: four
+specialists (news, fundamentals, sentiment, technical) each researching in
+their own context, a bull/bear debate, a trader who commits, and a **risk
+manager with the last word**.
+
+The risk manager is why this beats the framework it copies: it sees the user's
+*actual* holdings, their real stops, and what a sensible size would be against
+them. TradingAgents cannot — it runs in another process and knows nothing about
+the person reading it. Its spending isn't counted against Ada's ledger either,
+for the same reason.
+
+The risk manager also has to produce the **invalidation sentence** — which
+closes the loop with `positions.py`, since that's exactly what gets handed back
+weeks later when a stop alert fires.
+
+### It commits, deliberately
+
+The trader is asked for a direction, a conviction, what would change its mind,
+and where it would be wrong fastest. Hedging that into uselessness would be its
+own kind of dishonesty when a direction is what was asked for. What doesn't
+move: **there is no order path anywhere in Ada**, and a test asserts no tool is
+named `buy_*`, `sell_*`, `trade_*`, `order_*` or `execute_*`. Every output says
+it's one model's reading of public information, not reproducible between runs.
+
+### The blocker the first live run found
+
+`market_scan` ran, searched, and then **refused to answer** — because no search
+API key is configured, so `web_search` only reaches Wikipedia. It said so
+plainly rather than inventing catalysts:
+
+> "Anything I said about 'what's moving today' would be a guess dressed up as
+> research, and you specifically asked me not to pad this out."
+
+That's the prompt's "do not include a name whose catalyst you could not
+actually find" doing its job, and it's the right failure. But it means **the
+whole news-driven half of this feature is gated on a search key** —
+`BRAVE_SEARCH_API_KEY` or `TAVILY_API_KEY` in `.env`, both free at this volume.
+Price and technical data need no key and work today; "why did it move" does.
+
+### Two tiers, because one costs a dollar
+
+- `market_scan` — one research turn over current news, three to five candidates
+  with dated catalysts. ~$0.20. Explicitly a shortlist for further work.
+- `analyze_ticker` — the full seven-turn team. ~$1.00.
+
+Cheap sweep, expensive deep-dive on demand. Running the team over a watchlist
+every morning would cost more per month than most small accounts make, which is
+worth knowing before building a habit around it. Both are rate-limited, and a
+test asserts each tool's description states its own price — the failure mode
+otherwise is a model reaching for the dollar tool to answer "what's NVDA at",
+which `check_price` does instantly and free.
 
 ## Consolidation notes
 

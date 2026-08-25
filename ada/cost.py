@@ -104,11 +104,20 @@ def meter():
     """
     outer = getattr(_meters, "spent", None)
     _meters.spent = 0.0
+    # The getter reads this box rather than the thread-local, so it keeps
+    # answering after the block exits. Reading a total *after* the work is
+    # finished is the obvious thing to want, and the first version returned
+    # None there — a footgun aimed at exactly the caller it was written for.
+    total = [0.0]
+
+    def spent() -> float:
+        return _meters.spent if _meters.spent is not None else total[0]
+
     try:
-        yield lambda: _meters.spent
+        yield spent
     finally:
-        inner = _meters.spent
-        _meters.spent = None if outer is None else outer + inner
+        total[0] = _meters.spent
+        _meters.spent = None if outer is None else outer + total[0]
 
 
 def totals() -> dict:

@@ -144,6 +144,11 @@ DEFAULTS: dict[str, Any] = {
             # Three multi-round turns with web research. Minutes and real
             # money per call, so it cannot be fired casually or in a loop.
             "review_holding": {"per_minute": 1, "per_hour": 6, "per_day": 20},
+            # ~$1 and several minutes a call. A loop here is expensive in a
+            # way a rate limit is the only real defence against.
+            "analyze_ticker": {"per_minute": 1, "per_hour": 4, "per_day": 12},
+            "market_scan": {"per_minute": 1, "per_hour": 8, "per_day": 24},
+            "tradingagents_report": {"per_minute": 1, "per_hour": 3, "per_day": 8},
         },
     },
     "purchasing": {

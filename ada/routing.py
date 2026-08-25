@@ -79,6 +79,8 @@ _HINTS = {
     "schedule": ["recurring", "repeat", "daily", "weekly", "automatically", "morning", "routine"],
     "position": ["stock", "shares", "portfolio", "holding", "bought", "sold", "ticker", "invested"],
     "price": ["stock", "ticker", "shares", "trading", "market", "quote"],
+    "analyze": ["stock", "ticker", "buy", "sell", "opinion", "thoughts", "worth"],
+    "scan": ["market", "moving", "ideas", "opportunities", "news", "happening"],
 }
 
 _WORD = re.compile(r"[a-z0-9]+")

@@ -130,7 +130,7 @@ def _no_confirmations(action):
     )
 
 
-def _turn(prompt: str, on_status, tools: list[str]) -> str:
+def run_role(prompt: str, on_status, tools: list[str]) -> str:
     """One role's whole turn, in its own context.
 
     `tools` is empty for the synthesis: it has both cases in front of it and
@@ -204,13 +204,13 @@ def review(symbol: str, on_status=lambda _: None) -> dict:
 
     with cost.meter() as spent:
         on_status(f"researching the case for {symbol}")
-        bull = _turn(_BULL.format(symbol=symbol), on_status, RESEARCH_TOOLS)
+        bull = run_role(_BULL.format(symbol=symbol), on_status, RESEARCH_TOOLS)
 
         on_status(f"researching the case against {symbol}")
-        bear = _turn(_BEAR.format(symbol=symbol), on_status, RESEARCH_TOOLS)
+        bear = run_role(_BEAR.format(symbol=symbol), on_status, RESEARCH_TOOLS)
 
         on_status("weighing both against what you wrote down")
-        briefing = _turn(
+        briefing = run_role(
             _SYNTHESIS.format(
                 symbol=symbol, bull=bull, bear=bear, position=_position_note(symbol)
             ),

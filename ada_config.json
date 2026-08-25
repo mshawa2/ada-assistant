@@ -105,6 +105,21 @@
         "per_minute": 1,
         "per_hour": 6,
         "per_day": 20
+      },
+      "analyze_ticker": {
+        "per_minute": 1,
+        "per_hour": 4,
+        "per_day": 12
+      },
+      "market_scan": {
+        "per_minute": 1,
+        "per_hour": 8,
+        "per_day": 24
+      },
+      "tradingagents_report": {
+        "per_minute": 1,
+        "per_hour": 3,
+        "per_day": 8
       }
     }
   },

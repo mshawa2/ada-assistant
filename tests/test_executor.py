@@ -396,3 +396,13 @@ def test_the_job_prompt_says_nobody_is_there():
     assert "unattended" in prompt
     assert "not here" in prompt
     assert "final reply" in prompt
+
+
+def test_the_meter_still_answers_after_the_work_is_done():
+    """Reading a total after the work has finished is the obvious thing to
+    want, and the first version returned None there."""
+    with cost.meter() as spent:
+        cost.record(10_000, 1_000)
+        during = spent()
+
+    assert spent() == during > 0, "the getter keeps its answer"
