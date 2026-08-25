@@ -336,3 +336,130 @@ def test_a_disabled_connection_is_reported_as_needing_attention(monkeypatch, key
 
     assert "Robinhood" in out
     assert "DISABLED" in out
+
+
+# --- the heartbeat check ----------------------------------------------------
+
+
+def test_the_sync_check_is_off_by_default():
+    """It merges into the positions every alert runs on. Worth watching once
+    by hand before it runs while you're asleep."""
+    import json
+    from pathlib import Path
+
+    config = json.loads((Path(__file__).resolve().parent.parent / "ada_config.json").read_text())
+
+    assert config["heartbeat"]["checks"]["sync_portfolio"]["enabled"] is False
+
+
+def test_the_sync_check_is_registered():
+    from ada.heartbeat.checks import CHECKS
+    from ada.heartbeat.sync_check import check_sync
+
+    assert CHECKS["sync_portfolio"] is check_sync
+
+
+def test_nothing_syncs_when_the_market_is_shut(monkeypatch, broker, keyed):
+    from ada.heartbeat import sync_check
+
+    monkeypatch.setattr(sync_check, "market_open", lambda now=None: False)
+    sync_check.check_sync({})
+
+    assert positions.load_positions() == []
+
+
+def test_an_unconfigured_connection_is_a_setting_not_an_incident(monkeypatch, sent_notifications):
+    """A notice every fifteen minutes about a feature you never turned on
+    would be its own problem."""
+    from ada.heartbeat import notices, sync_check
+
+    monkeypatch.setattr(sync_check, "market_open", lambda now=None: True)
+    monkeypatch.delenv(brokerage.CLIENT_ID_VAR, raising=False)
+    monkeypatch.delenv(brokerage.CONSUMER_KEY_VAR, raising=False)
+
+    sync_check.check_sync({})
+
+    assert notices.list_notices() == []
+
+
+def test_a_flaky_brokerage_does_not_look_like_something_happening_to_your_money(
+    monkeypatch, sent_notifications, capsys, keyed
+):
+    from ada.heartbeat import notices, sync_check
+
+    monkeypatch.setattr(sync_check, "market_open", lambda now=None: True)
+    monkeypatch.setattr(brokerage, "accounts", lambda: (_ for _ in ()).throw(brokerage.BrokerageError("503")))
+
+    sync_check.check_sync({})
+
+    assert notices.list_notices() == []
+    assert "couldn't sync" in capsys.readouterr().out
+
+
+def test_a_new_holding_is_raised_because_it_will_never_alert(monkeypatch, broker, keyed, sent_notifications):
+    from ada.heartbeat import notices, sync_check
+
+    monkeypatch.setattr(sync_check, "market_open", lambda now=None: True)
+    sync_check.check_sync({})
+
+    raised = notices.list_notices()
+    assert len(raised) == 1
+    assert "New in your brokerage" in raised[0]["text"]
+    assert "won't alert" in raised[0]["text"]
+
+
+def test_a_share_count_moving_on_its_own_is_not_news(monkeypatch, broker, keyed, sent_notifications):
+    from ada.heartbeat import notices, sync_check
+
+    monkeypatch.setattr(sync_check, "market_open", lambda now=None: True)
+    sync_check.check_sync({})
+    for notice in notices.list_notices():
+        notices.dismiss_notice(notice["id"])
+
+    broker["holdings"]["positions"][0]["units"] = 15
+    sync_check.check_sync({})
+
+    assert notices.list_notices() == [], "an updated position is not worth interrupting for"
+
+
+def test_a_vanished_holding_is_raised_as_a_possible_sync_fault(
+    monkeypatch, broker, keyed, sent_notifications
+):
+    from ada.heartbeat import notices, sync_check
+
+    monkeypatch.setattr(sync_check, "market_open", lambda now=None: True)
+    sync_check.check_sync({})
+    for notice in notices.list_notices():
+        notices.dismiss_notice(notice["id"])
+
+    broker["holdings"]["positions"] = []
+    sync_check.check_sync({})
+
+    text = notices.list_notices()[0]["text"]
+    assert "no longer reports" in text
+    assert "sync fault" in text
+
+
+# --- the dashboard ----------------------------------------------------------
+
+
+def test_the_accounts_endpoint_serves_the_last_sync_and_never_calls_out(broker, keyed, monkeypatch):
+    from ada.face.app import app
+
+    portfolio.sync()
+    monkeypatch.setattr(brokerage, "accounts", lambda: (_ for _ in ()).throw(AssertionError("called out")))
+
+    body = app.test_client().get("/api/accounts").get_json()
+
+    assert body["accounts"][0]["number"] == "••••9012"
+    assert body["cash"] == 2500.0
+    assert body["at"] is not None
+
+
+def test_the_accounts_endpoint_before_any_sync_is_empty_not_broken():
+    from ada.face.app import app
+
+    body = app.test_client().get("/api/accounts").get_json()
+
+    assert body["accounts"] == []
+    assert body["at"] is None

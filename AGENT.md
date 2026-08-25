@@ -2088,6 +2088,85 @@ test asserts each tool's description states its own price — the failure mode
 otherwise is a model reaching for the dollar tool to answer "what's NVDA at",
 which `check_price` does instantly and free.
 
+## Reading the real book (SnapTrade Personal)
+
+Ada tracked what you typed in. Now she reads what you actually hold.
+
+**Personal, not Commercial.** Your brokerages are already connected in
+SnapTrade's dashboard, so there is no user to register, no `userSecret`, and no
+connection portal — two values from the API Key page are the whole of it.
+`brokerage.py` was written for the Commercial model and was simply wrong for
+this setup, so it was rewritten rather than extended.
+
+**No SDK.** The official client adds aiohttp, cryptography, frozendict,
+python-dateutil and urllib3 to do a job that is one HMAC. The algorithm is taken
+from the published SDK's `request_after_hook` and pinned by a test asserting our
+signature equals theirs for identical inputs. `separators=(",", ":")` and
+`sort_keys=True` are load-bearing — a space after a comma is a 401, and a
+maddening one to find.
+
+### Read-only is a property of the code
+
+SnapTrade's API includes `/accounts/{id}/trading/*`, and their guide warns a
+consumer key "may be able to trade where trading is enabled". So the key you
+gave Ada may be able to place orders.
+
+`_READS` is an allowlist, checked **before a socket is opened**. There is no
+`_post`. Tests assert no allowed path contains `trading`, `cancel`, `replace`,
+`preview` or `impact`, and that a forbidden path raises without touching the
+network. The guarantee isn't that Ada chooses not to trade; it's that she has no
+code path that could.
+
+### The merge is the feature
+
+`positions.add()` replaces a whole record — right the first time you tell Ada
+about something, catastrophic on every sync after, because it would erase the
+stop you set last week along with the thesis, the invalidation, the high-water
+mark and the fired flags. Silently. On a schedule.
+
+`merge_from_broker()` moves only what the broker owns:
+
+| field | owner | on sync |
+|---|---|---|
+| `shares`, `cost`, `account_id`, `source` | broker | overwritten |
+| `stop`, `target`, `trail_pct`, `thesis`, `invalidation`, `earnings_on` | you | **never touched** |
+| `high_water`, `fired`, `priced_at` | Ada | preserved |
+
+Two rules that look like edge cases and aren't:
+
+- **A holding the broker stops reporting is never deleted**, only reported. A
+  sync that hiccups and drops a position carrying a stop removes an alarm
+  without telling anyone — the worst failure available here.
+- **A holding Ada has never seen arrives inert** and is named as such. Without a
+  stop and an invalidation it will be priced and shown and will never alert.
+  `holdings_needing_rules` exists to say so; that's the difference between
+  tracking something and only appearing to.
+
+One symbol held across several accounts becomes one position — shares add,
+cost is share-weighted — because Ada tracks a symbol, not a lot.
+
+### Where it surfaces
+
+Five read-only tools, and an Accounts panel on the dashboard fed by
+`/api/accounts`, which serves **the last sync and never calls out** — the same
+rule holdings follow. Account numbers are masked in `brokerage.py` before they
+can reach a page.
+
+The heartbeat sync (`sync_portfolio`) is **off by default**. It merges into the
+positions every alert runs on, which is worth watching once by hand before it
+runs while you're asleep. It reports new and vanished holdings only: a share
+count moving by itself is not news.
+
+### A latent bug the tests found
+
+`ada.agent` imports the tool registry, the registry imports tools that import
+`debate.py`, and `debate.py` imported `ada.agent` at module scope — so
+`import ada.tools` failed on a half-built module whenever nothing had imported
+the agent first. Every existing test file happened to import `agent` at the top,
+so nothing had ever tried it the other way round. `heartbeat/executor.py`
+already documents this exact hazard and imports lazily; `debate.py` now does the
+same, with a subprocess test pinning the import order.
+
 ## Consolidation notes
 
 The sections above are in **build order**, not importance order — each records

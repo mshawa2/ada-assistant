@@ -10,6 +10,7 @@ from ada.heartbeat.executor import run_jobs
 from ada.heartbeat.scheduler import run_schedules
 from ada.heartbeat.notices import add_notice
 from ada.heartbeat.positions_check import check_positions
+from ada.heartbeat.sync_check import check_sync
 from ada.heartbeat.state import get_check_state, update_check_state
 from ada.tools.reminders import load_reminders, mark_due_notified, mark_stale_notified
 
@@ -110,4 +111,7 @@ CHECKS = {
     # Deterministic and free: an alert about a price shouldn't wait on a model
     # call, and a stop being hit is arithmetic.
     "positions": check_positions,
+    # Off by default in ada_config.json: it merges into the positions every
+    # alert runs on, and that's worth watching once before it runs unattended.
+    "sync_portfolio": check_sync,
 }

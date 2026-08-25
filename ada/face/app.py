@@ -28,7 +28,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from ada import approvals, audit, budget, cost, jobs, positions, recap, schedules, session, status
+from ada import approvals, audit, budget, cost, jobs, portfolio, positions, recap, schedules, session, status
 from ada.heartbeat.kill_switch import is_paused, set_paused
 from ada.heartbeat.notices import dismiss_notice, list_notices
 from ada.tools import specs as tool_specs
@@ -180,6 +180,36 @@ def api_schedules():
                 key=lambda s: (not s.get("enabled", True), s.get("next_due_at", 0)),
             )
         ]
+    )
+
+
+@app.route("/api/accounts")
+def api_accounts():
+    """Brokerage accounts, from the last sync — never a live call.
+
+    Same rule as `/api/positions`: the face reads state, it doesn't generate
+    it. Account numbers arrive already masked from `brokerage.py`, because a
+    loopback-only page is still a page.
+    """
+    last = portfolio.last_sync()
+    accounts = last.get("accounts") or []
+    return jsonify(
+        {
+            "accounts": [
+                {
+                    "id": a["id"],
+                    "name": a["name"],
+                    "number": a["number"],
+                    "cash": a["cash"],
+                    "buying_power": a.get("buying_power"),
+                    "total": a.get("total"),
+                    "holdings": len(a.get("holdings") or []),
+                }
+                for a in accounts
+            ],
+            "cash": sum(a["cash"] for a in accounts),
+            "at": last.get("at"),
+        }
     )
 
 

@@ -292,6 +292,11 @@ button.ghost { padding: 5px 9px; font-size: 11px; color: var(--dim); }
       <div class="body scroll" id="jobs"><p class="empty">Nothing queued.</p></div>
     </section>
 
+    <section class="card" id="accounts-card" style="display:none">
+      <header><h2>Accounts</h2><span class="count" id="v-cash">&mdash;</span></header>
+      <div class="body" id="accounts"></div>
+    </section>
+
     <section class="card" id="holdings-card" style="display:none">
       <header><h2>Holdings</h2><span class="count" id="v-holdings">0</span></header>
       <div class="body scroll" id="holdings"></div>
@@ -591,6 +596,34 @@ async function refreshHoldings() {
   }).join("");
 }
 
+// Served from the last sync, never a live brokerage call — same rule as
+// holdings. The "as of" matters more here than anywhere: cash that is six
+// hours stale and cash that is live look identical without it.
+async function refreshAccounts() {
+  const data = await get("/api/accounts");
+  if (!data) return;
+  const list = data.accounts || [];
+  $("accounts-card").style.display = list.length ? "" : "none";
+  $("v-cash").textContent = list.length ? money(data.cash) + " cash" : "—";
+  if (!changed("accounts", data)) return;
+
+  $("accounts").innerHTML = list.map(a => {
+    const legs = [`cash ${money(a.cash)}`];
+    if (a.buying_power) legs.push(`buying power ${money(a.buying_power)}`);
+    legs.push(`${a.holdings} holding${a.holdings === 1 ? "" : "s"}`);
+    if (data.at) legs.push(`as of ${esc(when(data.at))}`);
+    return `
+      <div class="row">
+        <div class="icon">▦</div>
+        <div class="body">
+          <div class="t">${esc(a.name)} <span style="color:var(--dimmer)">${esc(a.number)}</span></div>
+          <div class="legs">${legs.map(l => `<span>${esc(l)}</span>`).join("")}</div>
+        </div>
+        <div class="right">${a.total ? `<span class="pnl">${money(a.total)}</span>` : ""}</div>
+      </div>`;
+  }).join("");
+}
+
 /* --- usage --------------------------------------------------------------- */
 // An inline SVG area chart, because the alternative is a CDN this page can't
 // reach and a build step this project doesn't have.
@@ -738,7 +771,7 @@ refreshVitals(); setInterval(refreshVitals, 2500);
 function slow() {
   refreshJobs(); refreshBlocked(); refreshSchedules(); refreshNotices();
   refreshHeartbeat(); refreshActivity(); refreshUsage(); refreshConversation();
-  refreshHoldings();
+  refreshHoldings(); refreshAccounts();
 }
 slow(); setInterval(slow, 4000);
 </script>

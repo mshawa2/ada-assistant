@@ -205,6 +205,11 @@
       "positions": {
         "enabled": true,
         "interval_seconds": 300
+      },
+      "sync_portfolio": {
+        "enabled": false,
+        "interval_seconds": 900,
+        "level": "urgent"
       }
     }
   },
