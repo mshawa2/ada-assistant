@@ -1838,6 +1838,24 @@ turned up things no test would have:
    replaced — Approve genuinely failed to register. The chat and armed panels
    already guarded against this; the guard is now shared.
 
+### Holdings, and the one rule the face follows
+
+Holdings joined the page after the price alerts did — the same gap jobs and
+schedules had. The card is hidden entirely when nothing is held, and holdings
+are sorted **closest to their stop first**, because that's the one worth
+looking at.
+
+`/api/positions` serves **stored prices, never a live fetch.** The page polls
+every four seconds; pricing each holding there would be dozens of requests a
+minute to a free service that asks nothing of us, to show a number that moves
+in cents. `heartbeat/positions_check.py` reads prices every five minutes while
+the market is open, and the endpoint serves what it wrote — with `priced_at`,
+so the page says "as of 15:42" rather than implying it's live. Outside market
+hours that timestamp is the difference between a stale number and a lie.
+
+That's the rule the whole face follows: **it reads state, it never generates
+it.** A test asserts the endpoint doesn't call `market.read`.
+
 ### The conversation panel, when nothing is live
 
 `ada/status.py` is process memory. `/api/conversation` falls back to the

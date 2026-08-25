@@ -28,7 +28,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from ada import approvals, audit, budget, cost, jobs, recap, schedules, session, status
+from ada import approvals, audit, budget, cost, jobs, positions, recap, schedules, session, status
 from ada.heartbeat.kill_switch import is_paused, set_paused
 from ada.heartbeat.notices import dismiss_notice, list_notices
 from ada.tools import specs as tool_specs
@@ -181,6 +181,49 @@ def api_schedules():
             )
         ]
     )
+
+
+@app.route("/api/positions")
+def api_positions():
+    """Holdings, from what the heartbeat last stored — never a live fetch.
+
+    This endpoint is polled every few seconds by an open dashboard. Pricing
+    each holding here would mean dozens of requests a minute to a free service
+    that asks nothing of us, to show a number that moves in cents.
+    `heartbeat/positions_check.py` reads prices every five minutes while the
+    market is open; this serves what it wrote, and says when it was written so
+    the page can't imply it's live.
+    """
+    rows = []
+    for held in positions.load_positions():
+        price = held.get("last_price")
+        cost = held.get("cost")
+        stop = held.get("stop")
+        target = held.get("target")
+
+        rows.append(
+            {
+                "symbol": held["symbol"],
+                "shares": held["shares"],
+                "cost": cost,
+                "price": price,
+                "priced_at": held.get("priced_at"),
+                "stop": stop,
+                "target": target,
+                "pnl_pct": ((price - cost) / cost * 100) if price and cost else None,
+                "pnl": ((price - cost) * held["shares"]) if price and cost else None,
+                # Room left before each rule trips, as a percentage of the
+                # current price — the number a holder actually reads.
+                "to_stop_pct": ((price - stop) / price * 100) if price and stop else None,
+                "to_target_pct": ((target - price) / price * 100) if price and target else None,
+                "invalidation": held.get("invalidation"),
+                "fired": sorted(held.get("fired", {})),
+            }
+        )
+
+    # Closest to its stop first: that's the one worth looking at.
+    rows.sort(key=lambda r: (r["to_stop_pct"] is None, r["to_stop_pct"] or 0))
+    return jsonify(rows)
 
 
 @app.route("/api/usage")

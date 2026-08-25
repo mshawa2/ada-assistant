@@ -117,6 +117,7 @@ def add(
             "earnings_on": earnings_on,
             "high_water": None,
             "last_price": None,
+            "priced_at": None,
             "source": source,
             "opened_at": time.time(),
             "fired": {},
@@ -183,6 +184,7 @@ def record_reading(symbol: str, price: float) -> dict:
         if position is None:
             return {}
         position["last_price"] = price
+        position["priced_at"] = time.time()
         if position.get("high_water") is None or price > position["high_water"]:
             position["high_water"] = price
         _save(positions)

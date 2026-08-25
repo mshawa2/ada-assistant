@@ -184,6 +184,21 @@ button.ghost { padding: 5px 9px; font-size: 11px; color: var(--dim); }
 .gauge .bar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
 .gauge.over .bar i { background: var(--down); }
 
+/* --- holdings ------------------------------------------------------------- */
+.pnl { font-variant-numeric: tabular-nums; font-weight: 600; }
+.pnl.up { color: var(--up); }
+.pnl.down { color: var(--down); }
+
+/* How much room is left before a rule trips. The bar fills as the price
+   approaches the stop, so a full bar is the thing you'd want to notice from
+   across the room. */
+.rail { height: 3px; border-radius: 99px; background: var(--panel-2); margin-top: 6px; overflow: hidden; }
+.rail i { display: block; height: 100%; border-radius: 99px; background: var(--dimmer); }
+.rail.near i { background: var(--warn); }
+.rail.hit i { background: var(--down); }
+.legs { display: flex; gap: 12px; font: 10px/1.4 var(--mono); color: var(--dimmer); margin-top: 4px; }
+.legs .hit { color: var(--down); }
+
 /* --- conversation --------------------------------------------------------- */
 #chat { display: flex; flex-direction: column; gap: 11px; }
 .turn { display: flex; gap: 10px; }
@@ -275,6 +290,11 @@ button.ghost { padding: 5px 9px; font-size: 11px; color: var(--dim); }
     <section class="card">
       <header><h2>Jobs</h2><span class="count" id="v-jobs">0 open</span></header>
       <div class="body scroll" id="jobs"><p class="empty">Nothing queued.</p></div>
+    </section>
+
+    <section class="card" id="holdings-card" style="display:none">
+      <header><h2>Holdings</h2><span class="count" id="v-holdings">0</span></header>
+      <div class="body scroll" id="holdings"></div>
     </section>
 
     <section class="card">
@@ -527,6 +547,50 @@ function setStat(id, n, sub, hot = false, alert = false) {
   el.classList.toggle("alert", !!alert);
 }
 
+// Prices here are whatever the heartbeat last stored, never fetched by this
+// page — see /api/positions. The "as of" is not decoration: outside market
+// hours it's the difference between a stale number and a lie.
+async function refreshHoldings() {
+  const list = await get("/api/positions");
+  if (!list) return;
+  $("holdings-card").style.display = list.length ? "" : "none";
+  $("v-holdings").textContent = list.length;
+  if (!changed("holdings", list)) return;
+
+  $("holdings").innerHTML = list.map(h => {
+    const fired = h.fired || [];
+    const hit = fired.includes("stop");
+    // Distance from the stop, as how full the gap is. No stop set means no
+    // bar at all rather than an empty one implying safety.
+    const room = h.to_stop_pct;
+    const fill = room == null ? null : Math.max(0, Math.min(100, 100 - room * 4));
+    const near = room != null && room <= 5;
+
+    const legs = [];
+    if (h.stop != null) legs.push(`<span class="${hit ? "hit" : ""}">stop ${h.stop.toFixed(2)}${room != null ? ` (${room >= 0 ? room.toFixed(1) + "% above" : "breached"})` : ""}</span>`);
+    if (h.target != null && h.to_target_pct != null) legs.push(`<span>target ${h.target.toFixed(2)} (${h.to_target_pct.toFixed(1)}% away)</span>`);
+    if (h.priced_at) legs.push(`<span>as of ${esc(when(h.priced_at))}</span>`);
+    else legs.push(`<span>no price yet</span>`);
+
+    const pnl = h.pnl_pct == null ? "" :
+      `<span class="pnl ${h.pnl_pct >= 0 ? "up" : "down"}">${h.pnl_pct >= 0 ? "+" : ""}${h.pnl_pct.toFixed(1)}%</span>`;
+
+    return `
+      <div class="row">
+        <div class="icon">${hit ? "!" : "$"}</div>
+        <div class="body">
+          <div class="t">${esc(h.symbol)} &middot; ${h.shares}${h.price != null ? ` @ ${h.price.toFixed(2)}` : ""}</div>
+          <div class="legs">${legs.join("")}</div>
+          ${fill == null ? "" : `<div class="rail ${hit ? "hit" : near ? "near" : ""}"><i style="width:${fill.toFixed(0)}%"></i></div>`}
+        </div>
+        <div class="right">
+          ${pnl}
+          <div class="ago">${h.pnl == null ? "" : (h.pnl >= 0 ? "+" : "") + h.pnl.toFixed(2)}</div>
+        </div>
+      </div>`;
+  }).join("");
+}
+
 /* --- usage --------------------------------------------------------------- */
 // An inline SVG area chart, because the alternative is a CDN this page can't
 // reach and a build step this project doesn't have.
@@ -674,6 +738,7 @@ refreshVitals(); setInterval(refreshVitals, 2500);
 function slow() {
   refreshJobs(); refreshBlocked(); refreshSchedules(); refreshNotices();
   refreshHeartbeat(); refreshActivity(); refreshUsage(); refreshConversation();
+  refreshHoldings();
 }
 slow(); setInterval(slow, 4000);
 </script>

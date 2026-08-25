@@ -474,3 +474,74 @@ def test_tool_traffic_is_not_shown_as_something_someone_said(client):
     turns = client.get("/api/conversation").get_json()["turns"]
 
     assert [t["text"] for t in turns] == ["check it", "It's 24C."]
+
+
+# --- holdings ---------------------------------------------------------------
+
+
+def test_holdings_come_from_stored_prices_not_a_live_fetch(client, monkeypatch):
+    """This endpoint is polled every few seconds. Pricing each holding here
+    would mean dozens of requests a minute to a free service, to show a number
+    that moves in cents."""
+    from ada import market, positions
+
+    def must_not_be_called(symbol):
+        raise AssertionError("the dashboard fetched a price")
+
+    monkeypatch.setattr(market, "read", must_not_be_called)
+    positions.add("NVDA", 10, cost=180, stop=165)
+    positions.record_reading("NVDA", 200.0)
+
+    row = client.get("/api/positions").get_json()[0]
+
+    assert row["price"] == 200.0
+    assert row["priced_at"] is not None, "the page has to be able to say when"
+
+
+def test_a_holding_never_priced_is_shown_as_unpriced_not_as_zero(client):
+    from ada import positions
+
+    positions.add("NVDA", 10, cost=180, stop=165)
+
+    row = client.get("/api/positions").get_json()[0]
+
+    assert row["price"] is None
+    assert row["pnl_pct"] is None
+    assert row["to_stop_pct"] is None
+
+
+def test_a_holding_carries_the_room_left_before_each_rule_trips(client):
+    from ada import positions
+
+    positions.add("NVDA", 10, cost=180, stop=180, target=220)
+    positions.record_reading("NVDA", 200.0)
+
+    row = client.get("/api/positions").get_json()[0]
+
+    assert row["to_stop_pct"] == pytest.approx(10.0)
+    assert row["to_target_pct"] == pytest.approx(10.0)
+    assert row["pnl_pct"] == pytest.approx(11.11, abs=0.01)
+    assert row["pnl"] == pytest.approx(200.0)
+
+
+def test_the_holding_closest_to_its_stop_is_listed_first(client):
+    from ada import positions
+
+    positions.add("SAFE", 10, stop=100)
+    positions.record_reading("SAFE", 200.0)
+    positions.add("CLOSE", 10, stop=195)
+    positions.record_reading("CLOSE", 200.0)
+
+    listed = client.get("/api/positions").get_json()
+
+    assert [r["symbol"] for r in listed] == ["CLOSE", "SAFE"]
+
+
+def test_a_fired_alert_is_visible_on_the_holding(client):
+    from ada import positions
+
+    positions.add("NVDA", 10, stop=210)
+    positions.record_reading("NVDA", 200.0)
+    positions.set_fired("NVDA", "stop", True)
+
+    assert client.get("/api/positions").get_json()[0]["fired"] == ["stop"]
