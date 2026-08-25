@@ -2266,6 +2266,47 @@ so nothing had ever tried it the other way round. `heartbeat/executor.py`
 already documents this exact hazard and imports lazily; `debate.py` now does the
 same, with a subprocess test pinning the import order.
 
+## Web search without a key on disk
+
+Following Tavily's own setup guide turned up something worth keeping: `tvly
+login` authenticates through the **browser** and stores an OAuth token under
+`~/.mcp-auth/`. It never exposes a raw API key — so there is nothing to put in
+`.env`, and nothing to leak. `search.py` gained a `tavily_cli` provider that
+shells out to it, the only provider here that needs no secret at all.
+
+Order is brave → tavily → tavily_cli → wikipedia. A key someone put in `.env`
+is an explicit choice, and an OAuth login lying around shouldn't quietly
+override it.
+
+`tvly_ready()` checks the CLI is installed **and** logged in, because an
+installed-but-logged-out CLI would be chosen and then fail on every search —
+worse than falling through to Wikipedia and saying so. It's cached for five
+minutes since `web_search` asks on every call and it shells out.
+
+### What was not done, and why
+
+The guide also asks an agent to install Agent Skills globally, add a Claude
+plugin, register an MCP server, and then follow a long script for how to
+behave afterwards — including inspecting the user's projects and offering
+menus. None of that makes Ada's `web_search` work, all of it changes the
+user's tooling outside this project, and the last part is a vendor scripting
+someone else's assistant. Fetched instructions are data. The parts that served
+the actual goal were followed; the rest was read and declined.
+
+The installer was read before being run rather than piped into a shell
+unseen — it turned out to be a plain PyPI install, and it was put in its own
+virtualenv (`~/.tavily-cli`) because the machine had neither `uv` nor `pipx`,
+so the vendor's fallback would have been `pip --user` against a
+PEP 668-managed Homebrew Python.
+
+### A test that was green by luck
+
+Adding the provider broke three search tests, correctly: they had assumed no
+CLI was installed. The deeper problem was that they'd have passed or failed
+depending on whether the developer happened to have run `tvly login`. The
+autouse fixture now stubs `_tvly` rather than `tvly_ready`, which makes the
+suite deterministic *and* leaves the readiness check itself testable.
+
 ## Consolidation notes
 
 The sections above are in **build order**, not importance order — each records

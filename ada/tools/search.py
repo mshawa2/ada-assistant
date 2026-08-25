@@ -26,6 +26,10 @@ injection to enter. They're framed as data on the way out, matching `web.py`.
 
 import json
 import os
+import shutil
+import subprocess
+import time
+from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -34,19 +38,101 @@ from ada import settings
 from ada.tools.registry import tool
 
 _TIMEOUT = 12
+_tvly_ready_cache = {"at": 0.0, "ready": False}
 MAX_RESULTS = 10
 _SNIPPET_CHARS = 400
 
 BRAVE_KEY_NAME = "BRAVE_SEARCH_API_KEY"
 TAVILY_KEY_NAME = "TAVILY_API_KEY"
 
+# The Tavily CLI, authenticated by browser OAuth rather than an API key.
+# `tvly login` stores a token under ~/.mcp-auth/ and never exposes a raw key,
+# so there is nothing to put in .env — which makes this the only provider here
+# that needs no secret on disk at all. Worth supporting for exactly that.
+TVLY_PATHS = ("tvly", str(Path.home() / ".tavily-cli" / "bin" / "tvly"))
+_TVLY_TIMEOUT = 25
+
 _SETUP_HELP = (
-    "Open web search needs a free API key, and none is set. Add one to .env and restart:\n"
+    "Open web search needs a provider, and none is available. Either add a free key "
+    "to .env and restart:\n"
     f"  {BRAVE_KEY_NAME}=...   from https://brave.com/search/api/ (2,000 searches/month free)\n"
     f"  {TAVILY_KEY_NAME}=...  from https://tavily.com (1,000 searches/month free)\n"
+    "...or install the Tavily CLI and run `tvly login`, which uses browser sign-in and "
+    "needs no key on disk at all.\n"
     "Until then only Wikipedia lookups work. Tell the user this plainly rather than "
     "guessing at an answer."
 )
+
+
+def _tvly() -> str | None:
+    """The Tavily CLI binary, if one is installed."""
+    for candidate in TVLY_PATHS:
+        found = shutil.which(candidate) or (candidate if Path(candidate).exists() else None)
+        if found:
+            return found
+    return None
+
+
+def tvly_ready() -> bool:
+    """Whether the CLI is installed *and* logged in.
+
+    Both halves matter: an installed-but-unauthenticated CLI would be chosen as
+    the provider and then fail on every search, which is worse than falling
+    through to Wikipedia and saying so.
+
+    Cached because it shells out, and `web_search` asks on every call.
+    """
+    if _tvly_ready_cache["at"] and time.time() - _tvly_ready_cache["at"] < 300:
+        return _tvly_ready_cache["ready"]
+
+    binary = _tvly()
+    ready = False
+    if binary:
+        try:
+            done = subprocess.run(
+                [binary, "auth", "--json"], capture_output=True, text=True, timeout=10
+            )
+            ready = bool(json.loads(done.stdout or "{}").get("authenticated"))
+        except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
+            ready = False
+
+    _tvly_ready_cache.update(at=time.time(), ready=ready)
+    return ready
+
+
+def _search_tavily_cli(query: str, count: int) -> list[dict]:
+    binary = _tvly()
+    if not binary:
+        raise ValueError("The Tavily CLI isn't installed.")
+
+    try:
+        done = subprocess.run(
+            [binary, "search", query, "--json"],
+            capture_output=True,
+            text=True,
+            timeout=_TVLY_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise ValueError("The Tavily CLI took too long to answer.") from e
+    except OSError as e:
+        raise ValueError(f"Couldn't run the Tavily CLI: {e}") from e
+
+    if done.returncode != 0:
+        raise ValueError(f"The Tavily CLI failed: {(done.stderr or '').strip()[:200]}")
+
+    try:
+        payload = json.loads(done.stdout)
+    except json.JSONDecodeError as e:
+        raise ValueError("The Tavily CLI returned something unreadable.") from e
+
+    return [
+        {
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": (r.get("content") or "")[:_SNIPPET_CHARS],
+        }
+        for r in (payload.get("results") or [])[:count]
+    ]
 
 
 def _has_any_key() -> bool:
@@ -136,7 +222,12 @@ def _search_wikipedia(query: str, count: int) -> list[dict]:
     return results
 
 
-_PROVIDERS = {"brave": _search_brave, "tavily": _search_tavily, "wikipedia": _search_wikipedia}
+_PROVIDERS = {
+    "brave": _search_brave,
+    "tavily": _search_tavily,
+    "tavily_cli": _search_tavily_cli,
+    "wikipedia": _search_wikipedia,
+}
 
 
 def _choose_provider() -> str:
@@ -154,6 +245,10 @@ def _choose_provider() -> str:
         return "brave"
     if os.environ.get(TAVILY_KEY_NAME):
         return "tavily"
+    # After the keyed providers: a key in .env is an explicit choice, and an
+    # OAuth login shouldn't quietly override one someone configured.
+    if tvly_ready():
+        return "tavily_cli"
     return "wikipedia"
 
 

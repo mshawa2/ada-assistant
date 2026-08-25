@@ -15,6 +15,22 @@ from ada.tools import search
 
 
 @pytest.fixture(autouse=True)
+def no_tavily_cli(monkeypatch):
+    """No CLI provider unless a test asks for one.
+
+    `tvly_ready()` shells out to whatever is installed on the machine, so
+    without this the suite passes or fails depending on whether the developer
+    happens to have run `tvly login` — which is exactly the kind of test that
+    is green on one laptop and red on another.
+    """
+    # Patching `_tvly` rather than `tvly_ready` keeps the readiness check
+    # itself testable: with no binary found it returns False on its own, which
+    # is the real code path rather than a stub standing in for it.
+    monkeypatch.setattr(search, "_tvly", lambda: None)
+    search._tvly_ready_cache.update(at=0, ready=False)
+
+
+@pytest.fixture(autouse=True)
 def no_real_keys(monkeypatch):
     """Start every test with no provider key, whatever is in the real .env."""
     monkeypatch.delenv(search.BRAVE_KEY_NAME, raising=False)
@@ -230,3 +246,115 @@ def test_the_tool_is_registered():
     from ada.tools import specs
 
     assert "web_search" in {spec["name"] for spec in specs()}
+
+
+# --- the CLI provider, which needs no key -----------------------------------
+#
+# `tvly login` authenticates through the browser and stores an OAuth token
+# under ~/.mcp-auth/. It never exposes a raw API key, so there is nothing to
+# put in .env — the only provider here that needs no secret on disk.
+
+
+def _fake_tvly(monkeypatch, *, stdout="", returncode=0, boom=None):
+    import subprocess
+
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        if boom:
+            raise boom
+        return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="bad things")
+
+    monkeypatch.setattr(search, "_tvly", lambda: "/fake/tvly")
+    monkeypatch.setattr(subprocess, "run", run)
+    return calls
+
+
+def test_the_cli_is_used_when_it_is_installed_and_logged_in(monkeypatch):
+    monkeypatch.setattr(search, "tvly_ready", lambda: True)
+
+    assert search._choose_provider() == "tavily_cli"
+
+
+def test_a_key_in_env_still_wins_over_an_oauth_login(monkeypatch):
+    """A key someone put in .env is an explicit choice. An OAuth login lying
+    around shouldn't quietly override it."""
+    monkeypatch.setattr(search, "tvly_ready", lambda: True)
+    monkeypatch.setenv(search.BRAVE_KEY_NAME, "test-key")
+
+    assert search._choose_provider() == "brave"
+
+
+def test_an_installed_but_logged_out_cli_is_not_chosen(monkeypatch):
+    """Choosing it would mean failing on every search, which is worse than
+    falling through to Wikipedia and saying so."""
+    monkeypatch.setattr(search, "_tvly", lambda: "/fake/tvly")
+    _fake_tvly(monkeypatch, stdout='{"authenticated": false}')
+    search._tvly_ready_cache.update(at=0, ready=False)
+
+    assert search.tvly_ready() is False
+    assert search._choose_provider() == "wikipedia"
+
+
+def test_the_readiness_check_is_cached(monkeypatch):
+    """web_search asks on every call and this shells out."""
+    calls = _fake_tvly(monkeypatch, stdout='{"authenticated": true}')
+    search._tvly_ready_cache.update(at=0, ready=False)
+
+    assert search.tvly_ready() is True
+    assert search.tvly_ready() is True
+    assert len(calls) == 1
+
+
+def test_cli_results_are_parsed_into_the_shape_every_provider_returns(monkeypatch):
+    _fake_tvly(monkeypatch, stdout=json.dumps({
+        "results": [
+            {"title": "Nvidia Q1", "url": "https://example.com/a", "content": "x" * 900},
+            {"title": "Second", "url": "https://example.com/b", "content": "short"},
+        ]
+    }))
+
+    results = search._search_tavily_cli("nvidia", 5)
+
+    assert [r["title"] for r in results] == ["Nvidia Q1", "Second"]
+    assert results[0]["url"] == "https://example.com/a"
+    assert len(results[0]["snippet"]) == search._SNIPPET_CHARS, "long content is trimmed"
+
+
+def test_the_cli_respects_the_requested_count(monkeypatch):
+    _fake_tvly(monkeypatch, stdout=json.dumps({
+        "results": [{"title": str(i), "url": f"https://e.com/{i}", "content": ""} for i in range(20)]
+    }))
+
+    assert len(search._search_tavily_cli("q", 3)) == 3
+
+
+def test_a_failing_cli_is_an_error_not_an_empty_result(monkeypatch):
+    """An empty list would read as "nothing was written about this", which is
+    a different and much worse claim than "the search didn't run"."""
+    _fake_tvly(monkeypatch, returncode=1)
+
+    with pytest.raises(ValueError, match="Tavily CLI failed"):
+        search._search_tavily_cli("q", 5)
+
+
+def test_unreadable_cli_output_is_reported(monkeypatch):
+    _fake_tvly(monkeypatch, stdout="not json at all")
+
+    with pytest.raises(ValueError, match="unreadable"):
+        search._search_tavily_cli("q", 5)
+
+
+def test_a_hanging_cli_is_given_up_on(monkeypatch):
+    import subprocess
+
+    _fake_tvly(monkeypatch, boom=subprocess.TimeoutExpired("tvly", 25))
+
+    with pytest.raises(ValueError, match="too long"):
+        search._search_tavily_cli("q", 5)
+
+
+def test_the_setup_help_mentions_the_keyless_route():
+    assert "tvly login" in search._SETUP_HELP
+    assert "needs no key on disk" in search._SETUP_HELP
