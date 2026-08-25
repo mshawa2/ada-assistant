@@ -50,7 +50,7 @@ body {
 /* --- shell ---------------------------------------------------------------- */
 .app {
   display: grid; height: 100%;
-  grid-template-columns: 232px minmax(0, 1fr) 400px;
+  grid-template-columns: 254px minmax(0, 1fr) 400px;
 }
 .side { border-right: 1px solid var(--line); padding: 18px 14px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
 .main { padding: 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
@@ -90,6 +90,19 @@ body[data-state="waiting"] .statechip .pulse { background: var(--warn); animatio
 .kv .v { font-family: var(--mono); font-size: 11.5px; }
 
 .side .foot { margin-top: auto; font: 10px/1.6 var(--mono); color: var(--dimmer); }
+
+/* Accounts, in a 254px rail. The wide row layout it had in the main column
+   doesn't survive here, so each account stacks: who, then what it's worth,
+   then the two numbers that change. */
+.side-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.side-head span { font-size: 12px; font-weight: 600; }
+.side-head b { font: 11px/1 var(--mono); color: var(--dim); font-weight: 400; }
+.side-foot { font: 9.5px/1.4 var(--mono); color: var(--dimmer); margin-top: 10px; }
+.acct + .acct { margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--line-soft); }
+.acct .an { font-size: 12.5px; font-weight: 500; line-height: 1.3; }
+.acct .am { font: 10px/1.5 var(--mono); color: var(--dimmer); }
+.acct .at { font: 600 17px/1.3 var(--sans); letter-spacing: -.02em; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.acct .ac { font: 10px/1.5 var(--mono); color: var(--dim); }
 
 /* --- generic card --------------------------------------------------------- */
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); }
@@ -283,6 +296,12 @@ button.ghost { padding: 5px 9px; font-size: 11px; color: var(--dim); }
       <div class="kv"><span class="k">Today</span><span class="v" id="v-today">&mdash;</span></div>
     </div>
 
+    <div class="sidecard" id="accounts-card" style="display:none">
+      <div class="side-head"><span>Accounts</span><b id="v-cash">&mdash;</b></div>
+      <div id="accounts"></div>
+      <div class="side-foot" id="accounts-at"></div>
+    </div>
+
     <div class="foot">Local only<br>127.0.0.1:4173<br>Nothing here leaves this machine</div>
   </aside>
 
@@ -314,11 +333,6 @@ button.ghost { padding: 5px 9px; font-size: 11px; color: var(--dim); }
     <section class="card">
       <header><h2>Jobs</h2><span class="count" id="v-jobs">0 open</span></header>
       <div class="body scroll" id="jobs"><p class="empty">Nothing queued.</p></div>
-    </section>
-
-    <section class="card" id="accounts-card" style="display:none">
-      <header><h2>Accounts</h2><span class="count" id="v-cash">&mdash;</span></header>
-      <div class="body" id="accounts"></div>
     </section>
 
     <section class="card" id="holdings-card" style="display:none">
@@ -691,21 +705,22 @@ async function refreshAccounts() {
   $("v-cash").textContent = list.length ? money(data.cash) + " cash" : "—";
   if (!changed("accounts", data)) return;
 
-  $("accounts").innerHTML = list.map(a => {
-    const legs = [`cash ${money(a.cash)}`];
-    if (a.buying_power) legs.push(`buying power ${money(a.buying_power)}`);
-    legs.push(`${a.holdings} holding${a.holdings === 1 ? "" : "s"}`);
-    if (data.at) legs.push(`as of ${esc(when(data.at))}`);
+  // Biggest first — in a narrow rail the one that matters should not be
+  // below the fold.
+  const ordered = [...list].sort((a, b) => (b.total || 0) - (a.total || 0));
+
+  $("accounts").innerHTML = ordered.map(a => {
+    const cash = [`cash ${money(a.cash)}`];
+    if (a.holdings) cash.push(`${a.holdings} holding${a.holdings === 1 ? "" : "s"}`);
     return `
-      <div class="row">
-        <div class="icon">▦</div>
-        <div class="body">
-          <div class="t">${esc(a.name)} <span style="color:var(--dimmer)">${esc(a.number)}</span></div>
-          <div class="legs">${legs.map(l => `<span>${esc(l)}</span>`).join("")}</div>
-        </div>
-        <div class="right">${a.total ? `<span class="pnl">${money(a.total)}</span>` : ""}</div>
+      <div class="acct">
+        <div class="an">${esc(a.name)}</div>
+        <div class="am">${esc(a.number)}</div>
+        <div class="at">${a.total != null ? money(a.total) : money(a.cash)}</div>
+        <div class="ac">${esc(cash.join(" · "))}</div>
       </div>`;
   }).join("");
+  $("accounts-at").textContent = data.at ? `as of ${when(data.at)}` : "";
 }
 
 /* --- usage --------------------------------------------------------------- */

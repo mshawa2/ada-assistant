@@ -2215,8 +2215,12 @@ deleted config can't start syncing a brokerage by accident.
 
 ### The Accounts panel, and a book with a long tail
 
-Accounts show institution, masked number, cash, buying power, holdings count and
-"as of" — from the last sync, never a live call.
+Accounts live in the **left rail**, with Ada's own vitals — what you have, kept
+apart from what's happening to it. The wide row layout they had in the main
+column doesn't survive 254px, so each account stacks: name, masked number,
+value, then the two numbers that move. Biggest first, because in a narrow rail
+the one that matters shouldn't be below the fold. Served from the last sync,
+never a live call, with a single "as of" for the card rather than one per row.
 
 Holdings needed two changes once real data arrived. The card now carries a
 **total and aggregate P&L**, because forty-six percentages and no total is not
