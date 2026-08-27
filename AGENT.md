@@ -2621,6 +2621,14 @@ origin beats no alert, but it is the second answer, not the first.
 Caught by reading a live run's output, not by a test. The tests were green
 either side of it, because every one of them stubbed the geocoder.
 
+## Planned, not built
+
+- **Smart home** — `SMART_HOME.md`. What Ada could do with cameras, motion,
+  heating and lights, what HomeKit makes impossible (Secure Video is end-to-end
+  encrypted; there is no API), and why the answer is Home Assistant as the hub
+  with Apple Home kept as the interface. Nothing built; `home.py` already has
+  the seam it would use.
+
 ## Consolidation notes
 
 The sections above are in **build order**, not importance order — each records
