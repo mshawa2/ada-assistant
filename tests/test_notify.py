@@ -6,6 +6,8 @@ import subprocess
 import sys
 import textwrap
 
+import pytest
+
 from ada import notify
 from ada.heartbeat import notices, singleton
 from tests.conftest import TEST_DATA_DIR
@@ -110,8 +112,16 @@ def test_an_unknown_channel_is_reported_not_crashed_on(monkeypatch, capsys):
     assert "unknown notification channel" in capsys.readouterr().out
 
 
-def test_ntfy_is_skipped_when_no_topic_is_configured():
-    """An unconfigured phone push is a no-op, not an error."""
+def test_ntfy_is_skipped_when_no_topic_is_configured(monkeypatch):
+    """An unconfigured phone push is a no-op, not an error.
+
+    The delenv is load-bearing, not tidiness: `ada.config` calls `load_dotenv()`
+    at import, so a real ADA_NTFY_TOPIC from the developer's own .env is live in
+    the test process. Without this the test posts a genuine push to their phone
+    every time the suite runs.
+    """
+    monkeypatch.delenv("ADA_NTFY_TOPIC", raising=False)
+
     assert notify._send_ntfy("hi", {"ntfy_topic": "  "}, False) is False
 
 
@@ -215,3 +225,73 @@ def test_the_lock_is_free_again_after_release():
     result = _subprocess_acquire()
 
     assert result.stdout.strip() == "acquired", result.stderr
+
+
+# --- keeping the topic out of the repo --------------------------------------
+#
+# An ntfy topic is a public URL: anyone who knows it can read your notices and
+# post to them. `ada_config.json` is tracked in git, so the topic is read from
+# the environment first and the config is only a fallback.
+
+
+def test_the_topic_is_read_from_the_environment_first(monkeypatch):
+    """ada_config.json is tracked; .env is not. A topic committed by accident
+    is a password committed by accident."""
+    posted = {}
+
+    def fake_urlopen(request, timeout=None):
+        posted["url"] = request.full_url
+        raise AssertionError("stop here — the URL is what's under test")
+
+    monkeypatch.setattr(notify.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("ADA_NTFY_TOPIC", "from-env")
+
+    with pytest.raises(AssertionError):
+        notify._send_ntfy("x", {"ntfy_topic": "from-tracked-config"}, False)
+
+    assert "from-env" in posted["url"]
+    assert "from-tracked-config" not in posted["url"]
+
+
+def test_the_config_is_only_a_fallback(monkeypatch):
+    posted = {}
+
+    def fake_urlopen(request, timeout=None):
+        posted["url"] = request.full_url
+        raise AssertionError("stop here")
+
+    monkeypatch.setattr(notify.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.delenv("ADA_NTFY_TOPIC", raising=False)
+
+    with pytest.raises(AssertionError):
+        notify._send_ntfy("x", {"ntfy_topic": "from-config"}, False)
+
+    assert "from-config" in posted["url"]
+
+
+def test_a_blank_topic_sends_nothing_rather_than_posting_to_a_bare_host(monkeypatch):
+    """Posting to https://ntfy.sh/ with no topic is a request to a stranger."""
+    monkeypatch.setenv("ADA_NTFY_TOPIC", "   ")
+
+    assert notify._send_ntfy("x", {}, False) is False
+
+
+def test_a_critical_notice_is_marked_urgent_to_the_phone(monkeypatch):
+    """Priority is what decides whether a phone breaks through Do Not Disturb,
+    which is the whole point of the critical level."""
+    headers = {}
+
+    def fake_urlopen(request, timeout=None):
+        headers.update(request.headers)
+        raise AssertionError("stop here")
+
+    monkeypatch.setattr(notify.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("ADA_NTFY_TOPIC", "t")
+
+    with pytest.raises(AssertionError):
+        notify._send_ntfy("stop hit", {}, urgent=True)
+    assert headers.get("Priority") == "urgent"
+
+    with pytest.raises(AssertionError):
+        notify._send_ntfy("fyi", {}, urgent=False)
+    assert headers.get("Priority") == "default"

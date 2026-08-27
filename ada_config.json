@@ -157,7 +157,8 @@
   "notifications": {
     "channels": [
       "terminal",
-      "macos"
+      "macos",
+      "ntfy"
     ],
     "push_levels": [
       "urgent",
