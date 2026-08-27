@@ -221,7 +221,7 @@
         "interval_seconds": 120,
         "horizon_hours": 4,
         "lead_minutes": 10,
-        "buffer_minutes": 10,
+        "buffer_minutes": 20,
         "mode": "driving",
         "level": "critical"
       }
