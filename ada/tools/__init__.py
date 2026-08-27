@@ -6,6 +6,7 @@ from ada.tools import (  # noqa: F401  imported for tool-registration side effec
     contacts,
     drafts,
     email_tool,
+    freetime_tool,
     heartbeat_control,
     home,
     imessage,

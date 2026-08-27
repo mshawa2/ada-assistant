@@ -15,7 +15,7 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-78 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+79 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
@@ -23,7 +23,7 @@ depending on the arguments (a lock, not a lamp). Everything else runs freely.
 | Your day | `daily_brief` |
 | Reminders & tasks | `add_reminder`, `complete_reminder`, `list_reminders`, `snooze_reminder` |
 | Shopping | `shopping_list` ⚠️* |
-| Calendar | `create_event` ⚠️, `delete_event` ⚠️, `find_events`, `list_calendars`, `list_events` |
+| Calendar | `create_event` ⚠️, `delete_event` ⚠️, `find_events`, `find_free_time`, `list_calendars`, `list_events` |
 | Messages | `find_contact`, `read_recent_messages`, `send_message` ⚠️ |
 | Email | `archive_email` ⚠️, `compose_email` ⚠️, `list_email`, `mark_email_read` ⚠️, `read_email`, `reply_email` ⚠️, `search_email` |
 | Notes & drafts | `delete_note` ⚠️, `list_drafts`, `list_notes`, `read_draft`, `read_note`, `save_draft`, `search_notes` |
@@ -656,7 +656,7 @@ both old files are gone (their contents carried over; recoverable from git).
   `weekend` (later quiet hours, no staleness nagging) and `away` (push to
   phone only).
 - **Locale** — `timezone`, `time_format`, `units`, `location`,
-  `location_source`, `location_shortcut`. A naive `due_at` is now read
+  `location_source`, `location_shortcut`, `day_starts`, `day_ends`. A naive `due_at` is now read
   in the *configured* zone, so an always-on host in a different timezone still
   schedules "3pm" at 3pm where you are. An unknown zone warns and falls back
   rather than raising. `location` is a plain place name ("Austin, TX") and is
@@ -2525,6 +2525,43 @@ the same silent failure wearing a hat.
 at import, and `loop._run_due_checks` skips any name not in it, so a running
 launchd agent ignores a check added underneath it — config reloads every tick,
 the check registry does not.
+
+## Finding the gaps (`ada/freetime.py`)
+
+`list_events` answers "what's on". Nobody schedules anything from that — you
+schedule from the gaps, and reading a week of a full calendar to find them by
+eye is exactly the tedious, error-prone work a computer should do. It's
+interval arithmetic, so like `rule_options` and `brief.py` it costs nothing and
+can't be wrong about the maths.
+
+Three judgement calls, none obvious, all documented where they're made:
+
+- **All-day events don't make you busy.** "Sarah's birthday" would otherwise
+  black out the day. The cost is that a real all-day commitment looks free —
+  the less damaging error, since suggesting a slot you have to decline beats
+  hiding every slot for a week. They're *named* in the output rather than
+  silently skipped, so the caller sees what was ignored.
+- **Only the working window counts.** Free time at three in the morning isn't
+  free time. `locale.day_starts`/`day_ends`, defaulting 09:00–18:00, because
+  someone else's day starts at six.
+- **Declined events are still busy.** Participation status isn't reliably
+  readable here, so erring towards busy means the answer is never "you're free"
+  when you aren't — the direction that costs a double-booking.
+
+Overlaps are reported rather than silently merged: a double-booking you hadn't
+noticed is worth more than the gap either side of it, so it leads the answer.
+The free-time maths merges them anyway, since you can't be more busy than busy.
+
+**One bug the tests caught that reasoning hadn't.** Days are queried one at a
+time, so an event running from Monday afternoon to Tuesday morning comes back
+from *both* queries — and two copies of one meeting look exactly like two
+meetings at once. It reported the event double-booked against itself. Events
+are now keyed by title-plus-span before the conflict pass, identity rather than
+accumulation, because the two copies are different objects.
+
+Today's window starts *now*, not at nine: a gap that has already passed isn't
+free, it's over. The events query still uses the whole working day, because a
+meeting that started at nine and runs to two is still busy at eleven.
 
 ## Consolidation notes
 
