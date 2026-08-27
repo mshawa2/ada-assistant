@@ -209,6 +209,33 @@ def _search(criteria: list[str], count: int) -> list[tuple[str, object]]:
         return _fetch(connection, uids, envelope_only=True)
 
 
+def is_configured() -> bool:
+    """Whether there's an account to ask at all, without opening a connection.
+
+    The daily brief needs this to stay *silent* about email when none is set
+    up, rather than printing a five-line setup guide every morning. Mirrors
+    `_Mailbox.__enter__`'s own precondition, deliberately: one place decides
+    what "configured" means and the other asks first.
+    """
+    address = ((settings.get("email", {}) or {}).get("address") or "").strip()
+    return bool(address and os.environ.get(PASSWORD_KEY_NAME))
+
+
+def unread_count() -> int:
+    """How many unread messages are in the inbox.
+
+    SEARCH only — no FETCH. `_search` downloads a header block per message to
+    render a list, which is the right cost for reading your mail and entirely
+    wasted when the answer is a number. This is one round trip whatever the
+    inbox holds.
+    """
+    with _Mailbox() as connection:
+        status, data = connection.uid("SEARCH", None, "UNSEEN")
+        if status != "OK":
+            raise EmailUnavailable(f"The mail server refused that search: {status}")
+        return len((data[0] or b"").split())
+
+
 @tool(
     name="list_email",
     description=(

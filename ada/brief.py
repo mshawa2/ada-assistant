@@ -35,7 +35,7 @@ import time
 
 from ada import approvals, location, notify, settings, when
 from ada.heartbeat.notices import list_notices
-from ada.tools import calendar_tool, reminders, weather
+from ada.tools import calendar_tool, email_tool, reminders, weather
 
 NOTHING = "Nothing needing you right now: no blocked work, nothing left on the calendar today, no reminders due."
 
@@ -129,6 +129,26 @@ def _reminders() -> list[str]:
     return lines
 
 
+def _email() -> list[str]:
+    """How much unread mail is waiting.
+
+    Silent when there's no account configured, rather than printing the setup
+    guide every morning — the same bargain `_weather` makes about an unset
+    location. Silent at zero too, because "0 unread" is not news and a brief
+    that reports every absence stops being read.
+
+    A count, not a list. The brief's job is to tell you whether the inbox needs
+    you at all; deciding *what* to answer is `list_email`'s, and a morning brief
+    that inlines ten subject lines has become the inbox it was summarizing.
+    """
+    if not email_tool.is_configured():
+        return []
+    count = email_tool.unread_count()
+    if not count:
+        return []
+    return [f"Inbox: {count} unread email{'s' if count != 1 else ''}."]
+
+
 def _noticed() -> list[str]:
     """What the heartbeat saw while you weren't looking.
 
@@ -203,13 +223,14 @@ def _weather() -> list[str]:
 
 
 # Order is the point: whether you can be reached at all, then blocked work,
-# then the parts of today that have a clock attached, then things merely worth
-# knowing.
+# then the parts of today that have a clock attached, then what's waiting on
+# you, then things merely worth knowing.
 SECTIONS = (
     ("notification channels", _alerting),
     ("blocked work", _blocked),
     ("calendar", _calendar),
     ("reminders", _reminders),
+    ("email", _email),
     ("notices", _noticed),
     ("weather", _weather),
 )

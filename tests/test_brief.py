@@ -8,7 +8,7 @@ import pytest
 
 from ada import brief, settings
 from ada.heartbeat import notices
-from ada.tools import reminders
+from ada.tools import email_tool, reminders
 
 
 class FakeEvent:
@@ -285,3 +285,100 @@ def test_compose_never_raises(monkeypatch):
     result = brief.compose()
 
     assert result.count("everything is broken") == len(brief.SECTIONS)
+
+
+# --- the inbox ---------------------------------------------------------------
+
+
+class FakeIMAP:
+    """Enough of an IMAP connection for unread_count. Records what it was asked,
+    so a test can prove no message bodies were downloaded."""
+
+    def __init__(self, uids, status="OK"):
+        self._uids, self._status = uids, status
+        self.calls = []
+
+    def uid(self, command, *args):
+        self.calls.append((command, args))
+        return self._status, [b" ".join(self._uids)]
+
+    def close(self):
+        pass
+
+    def logout(self):
+        pass
+
+
+def _mailbox_returning(monkeypatch, uids, status="OK"):
+    fake = FakeIMAP(uids, status)
+
+    class Mailbox:
+        def __enter__(self_inner):
+            return fake
+
+        def __exit__(self_inner, *exc):
+            return False
+
+    monkeypatch.setattr(email_tool, "_Mailbox", Mailbox)
+    monkeypatch.setattr(email_tool, "is_configured", lambda: True)
+    return fake
+
+
+def test_unread_email_is_reported_as_a_count(monkeypatch):
+    _mailbox_returning(monkeypatch, [b"1", b"2", b"3"])
+
+    assert "Inbox: 3 unread emails." in brief.compose()
+
+
+def test_one_unread_email_is_singular(monkeypatch):
+    _mailbox_returning(monkeypatch, [b"7"])
+
+    assert "Inbox: 1 unread email." in brief.compose()
+
+
+def test_an_empty_inbox_is_not_news(monkeypatch):
+    """A brief that reports every absence stops being read."""
+    _mailbox_returning(monkeypatch, [])
+
+    assert brief.compose() == brief.NOTHING
+
+
+def test_no_message_bodies_are_downloaded_for_a_count(monkeypatch):
+    """`_search` fetches a header block per message to render a list, which is
+    entirely wasted when the answer is a number."""
+    fake = _mailbox_returning(monkeypatch, [b"1", b"2"])
+
+    brief.compose()
+
+    assert [call[0] for call in fake.calls] == ["SEARCH"], "one round trip, no FETCH"
+
+
+def test_an_unconfigured_mailbox_says_nothing_at_all(monkeypatch):
+    """Rather than printing the five-line setup guide every morning."""
+    monkeypatch.setattr(email_tool, "is_configured", lambda: False)
+    monkeypatch.setattr(
+        email_tool, "unread_count", lambda: pytest.fail("must not open a connection")
+    )
+
+    assert brief.compose() == brief.NOTHING
+
+
+def test_a_refused_search_is_reported_not_silently_zero(monkeypatch):
+    """Zero unread and "the server wouldn't tell me" are different answers."""
+    _mailbox_returning(monkeypatch, [b"1"], status="NO")
+
+    assert "couldn't read the email" in brief.compose()
+
+
+def test_a_mailbox_that_cannot_be_reached_does_not_take_the_brief_down(monkeypatch):
+    def broken():
+        raise email_tool.EmailUnavailable("the mail server is unreachable")
+
+    monkeypatch.setattr(email_tool, "is_configured", lambda: True)
+    monkeypatch.setattr(email_tool, "unread_count", broken)
+    reminders.add_reminder("call the dentist", due="an hour ago", due_at=_iso(hours=-1))
+
+    result = brief.compose()
+
+    assert "couldn't read the email" in result
+    assert "call the dentist" in result, "the surviving sections still run"

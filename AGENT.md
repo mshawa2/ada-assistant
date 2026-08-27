@@ -2379,7 +2379,11 @@ would have depended on the model remembering to call five tools in order.
 Two rules the sections follow, and the second is the load-bearing one:
 
 - **Quiet when there's nothing.** Empty sections print no heading; an empty day
-  is one line. The same contract `greeting.startup_summary` keeps.
+  is one line. The same contract `greeting.startup_summary` keeps. The inbox
+  section takes this furthest: silent with no account configured (rather than
+  printing the setup guide every morning, the bargain `_weather` makes about an
+  unset location) and silent at zero, because "0 unread" is not news and a
+  brief that reports every absence stops being read.
 - **Loud when broken.** A section that raises is reported in place rather than
   dropped, because omitting the calendar renders as "you have nothing on today"
   — a brief confidently telling you your morning is free is worse than no brief
@@ -2389,6 +2393,13 @@ The window is now-to-midnight, not the whole day: a brief read at two in the
 afternoon that leads with the nine o'clock standup is reporting history.
 Overdue reminders are the deliberate exception. Undated reminders are counted,
 not listed, and only as a footnote to something actually due.
+
+`email_tool.unread_count()` is SEARCH-only, no FETCH. `_search` downloads a
+header block per message to render a list, which is the right cost for reading
+mail and entirely wasted when the answer is a number — this is one round trip
+whatever the inbox holds. A count rather than a list, deliberately: the brief's
+job is to say whether the inbox needs you at all, and one that inlines ten
+subject lines has become the inbox it was summarizing.
 
 ### Weather, and why CoreLocation isn't in here
 
