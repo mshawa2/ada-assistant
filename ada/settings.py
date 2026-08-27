@@ -62,6 +62,11 @@ DEFAULTS: dict[str, Any] = {
         "timezone": "",
         "time_format": "24h",
         "units": "metric",
+        # Where the user actually is, as a place name the weather service can
+        # geocode ("Austin, TX"). Empty means the daily brief simply leaves the
+        # weather out — inferring it from the machine's IP would send an address
+        # to a third party nobody asked about, and be wrong on a VPN besides.
+        "location": "",
     },
     "model": {
         "conversation": "claude-sonnet-5",

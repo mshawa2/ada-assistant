@@ -73,6 +73,7 @@ _HINTS = {
     "spending": ["cost", "budget", "spent", "money"],
     "shopping": ["groceries", "buy", "milk"],
     "weather": ["rain", "sunny", "cold", "hot", "forecast", "temperature"],
+    "brief": ["morning", "today", "day", "catch", "summary", "overview", "briefing", "agenda"],
     "heartbeat": ["quiet", "proactive", "background"],
     "job": ["background", "queue", "queued", "later", "progress", "underway", "still"],
     "approval": ["approve", "approval", "blocked", "permission"],

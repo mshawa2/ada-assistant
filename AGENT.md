@@ -15,11 +15,12 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-77 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+78 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
 |---|---|
+| Your day | `daily_brief` |
 | Reminders & tasks | `add_reminder`, `complete_reminder`, `list_reminders`, `snooze_reminder` |
 | Shopping | `shopping_list` ⚠️* |
 | Calendar | `create_event` ⚠️, `delete_event` ⚠️, `find_events`, `list_calendars`, `list_events` |
@@ -654,10 +655,13 @@ both old files are gone (their contents carried over; recoverable from git).
 - **Modes** ship as `focus` (critical-only pushes, no note-watching),
   `weekend` (later quiet hours, no staleness nagging) and `away` (push to
   phone only).
-- **Locale** — `timezone`, `time_format`, `units`. A naive `due_at` is now read
+- **Locale** — `timezone`, `time_format`, `units`, `location`. A naive `due_at` is now read
   in the *configured* zone, so an always-on host in a different timezone still
   schedules "3pm" at 3pm where you are. An unknown zone warns and falls back
-  rather than raising.
+  rather than raising. `location` is a plain place name ("Austin, TX") and is
+  what the daily brief geocodes for weather; empty means the brief simply omits
+  weather, because inferring a location from the machine's IP would send an
+  address to a third party nobody asked about and be wrong on a VPN besides.
 - **Identity** — assistant name, your name and pronouns, tone and verbosity all
   feed the system prompt, so "be less chatty" is a config change rather than a
   code edit.
@@ -1283,6 +1287,15 @@ mandatory half; leaving the ceiling alone would have let it silently eat the
 scored budget, and tools that used to be routed in stopped being — caught by
 `tests/test_routing.py`, not by reasoning. `list_approvals` is deliberately
 *not* core: it isn't gated and isn't daily, and the hints reach it.
+
+`daily_brief` is not core either, and for a sharper version of the same reason.
+It *is* daily, so core looked right — but core was already 20 of the 24 slots,
+and adding it dropped the scored budget to four and pushed `list_email` out of
+"read me my unread email". `tests/test_routing.py` caught it, again. It sits on
+a hint instead (`morning`, `today`, `catch`, `agenda`), which is what a
+cross-cutting tool needs anyway: "what have I got on today" shares no vocabulary
+with a tool called `daily_brief`, and every word of it is too common to match
+anything on its own.
 
 **Routing is an optimization, never a capability limit.** That rule shapes
 everything, because "I can't do that" about something Ada plainly can is far
