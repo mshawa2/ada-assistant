@@ -215,6 +215,15 @@
         "at": "08:00",
         "catch_up_hours": 4,
         "level": "critical"
+      },
+      "leave_by": {
+        "enabled": true,
+        "interval_seconds": 120,
+        "horizon_hours": 4,
+        "lead_minutes": 10,
+        "buffer_minutes": 10,
+        "mode": "driving",
+        "level": "critical"
       }
     }
   },

@@ -2563,6 +2563,53 @@ Today's window starts *now*, not at nine: a gap that has already passed isn't
 free, it's over. The events query still uses the whole working day, because a
 meeting that started at nine and runs to two is still busy at eleven.
 
+## Leaving on time (`ada/travel.py`, `heartbeat/leave_check.py`)
+
+A calendar says the meeting is at three. The number you act on is when to *set
+off*, and nothing computed it — so you either worked it out every time or found
+out you were wrong on the way. Now that pushes reach a phone, this is an alert
+worth having.
+
+**Two keyless services, and what's honest about them.** Nominatim
+(OpenStreetMap) geocodes street addresses, which Open-Meteo cannot — it matches
+place names only, the same limitation that made `place_candidates` necessary.
+OSRM's public demo server routes. It is explicitly *not* offered for production
+use, so every failure here is soft: no route means no leave-by line, never an
+error. **Neither knows about traffic** — OSRM's public instance routes at
+free-flow speeds, so its estimate is the optimistic one, which is the dangerous
+direction for this feature. `buffer_minutes` pads the journey and
+`lead_minutes` warns before the computed time; both are settings, because how
+much slack someone wants is not a thing to decide for them.
+
+**It stays quiet aggressively.** Most calendar entries aren't journeys.
+`looks_like_a_place` rejects conference links, "TBC" and room names before
+anything touches the network; a geocoding miss is cached so "Zoom" is asked
+about once, ever; and nothing is looked up unless an event with a real location
+is inside the horizon. A day of video calls costs zero requests. A destination
+further than `max_km` is skipped too — a calendar entry about a trip to Tokyo
+is not a journey you're about to make.
+
+**One alert per event**, keyed by the calendar's own identifier and pruned an
+hour after the event starts. This runs on a two-minute tick; an alert repeated
+for an hour is worse than no alert.
+
+### The 11.1km bug
+
+`_origin` first reused `location.place_candidates`, which was the obvious move
+and quietly wrong. Those candidates exist to satisfy Open-Meteo's place-name
+geocoder, so they reduce `1234 N Sample Ave, Chicago IL 60601` to `Chicago` —
+correct for a weather forecast, and 11.1km wrong for a journey. Measured, not
+estimated: the full address resolves to (41.9180, -87.7463), the city name to
+(41.8756, -87.6244). At driving speeds that's the difference between "leave in
+half an hour" and "leave now", which is the entire point of the feature.
+
+Nominatim understands street addresses, so the whole address is tried first and
+the candidates are the fallback for when it doesn't recognise one — a rough
+origin beats no alert, but it is the second answer, not the first.
+
+Caught by reading a live run's output, not by a test. The tests were green
+either side of it, because every one of them stubbed the geocoder.
+
 ## Consolidation notes
 
 The sections above are in **build order**, not importance order — each records
