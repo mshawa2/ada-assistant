@@ -2415,6 +2415,17 @@ become one you turn off:
    whose usual content is "nothing" trains you to swipe it away unread, which
    costs you the morning it isn't. `push_when_empty` opts back in.
 
+**The level is `critical`, and that means two things.** `deliver` maps
+`critical` — and only `critical` — to ntfy's `Priority: urgent`, which is what
+breaks a push through a phone's Do Not Disturb; at `urgent` the brief arrives
+at default priority and a sleep focus swallows it at 08:00, which is exactly
+when a sleep focus is likely to be on. The second thing is that `critical` also
+bypasses quiet hours in `push_disposition`. That is currently inert: quiet hours
+end at 08:00, `in_quiet_hours` treats `end` as exclusive, and the brief can only
+fire from `at` through `at + catch_up_hours` — so every time it can actually run
+is already outside the window. Move `at` earlier than 08:00 and the bypass stops
+being theoretical.
+
 It posts through `add_notice`, which buys quiet-hours hold-and-retry and the
 greeting for free. That creates one problem worth naming: the brief is now
 itself a notice, so without an exclusion tomorrow's brief would quote today's

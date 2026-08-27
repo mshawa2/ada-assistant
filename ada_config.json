@@ -212,7 +212,7 @@
         "interval_seconds": 300,
         "at": "08:00",
         "catch_up_hours": 4,
-        "level": "urgent"
+        "level": "critical"
       }
     }
   },
