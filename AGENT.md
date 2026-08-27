@@ -2623,6 +2623,10 @@ either side of it, because every one of them stubbed the geocoder.
 
 ## Planned, not built
 
+- **Hosting Ada off the laptop** — `HOSTING.md`. What a Raspberry Pi would and
+  wouldn't run: ~15 of 79 tools are macOS-native (EventKit, Contacts, iMessage,
+  AppleScript, Shortcuts) and go with it, including the calendar, `find_free_time`
+  and leave-by alerts. A used Mac mini keeps all of it for no code changes.
 - **Smart home** — `SMART_HOME.md`. What Ada could do with cameras, motion,
   heating and lights, what HomeKit makes impossible (Secure Video is end-to-end
   encrypted; there is no API), and why the answer is Home Assistant as the hub
