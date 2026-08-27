@@ -209,6 +209,36 @@ def test_weather_is_included_once_a_location_is_set():
     assert "fine in Austin, TX" in brief.compose()
 
 
+# --- whether you can be reached at all ---------------------------------------
+
+
+def test_a_channel_that_cannot_send_is_reported_in_the_brief(monkeypatch):
+    """`deliver` can only say this into a log, which on the launchd daemon is a
+    file nobody reads. The brief is the thing actually read."""
+    monkeypatch.setattr(brief.notify, "unavailable_channels", lambda: [("ntfy", "no topic is set")])
+
+    result = brief.compose()
+
+    assert "Alerting is degraded:" in result
+    assert "ntfy: no topic is set" in result
+
+
+def test_broken_alerting_leads_the_brief(monkeypatch):
+    """Ahead even of blocked work: it bears on whether you are seeing the rest."""
+    monkeypatch.setattr(brief.notify, "unavailable_channels", lambda: [("ntfy", "no topic is set")])
+    monkeypatch.setattr(brief.approvals, "pending", lambda: [{"id": 1, "pending_approval": {}}])
+    monkeypatch.setattr(brief.approvals, "describe", lambda job: "buy the thing")
+
+    result = brief.compose()
+
+    assert result.index("Alerting is degraded") < result.index("Waiting on you")
+
+
+def test_working_channels_say_nothing():
+    """The default in the test config is a terminal-only setup, which works."""
+    assert "Alerting" not in brief.compose()
+
+
 # --- the part that matters --------------------------------------------------
 
 

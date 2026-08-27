@@ -112,8 +112,10 @@ def test_an_unknown_channel_is_reported_not_crashed_on(monkeypatch, capsys):
     assert "unknown notification channel" in capsys.readouterr().out
 
 
-def test_ntfy_is_skipped_when_no_topic_is_configured(monkeypatch):
-    """An unconfigured phone push is a no-op, not an error.
+def test_an_unconfigured_phone_push_says_so_rather_than_going_quiet(monkeypatch):
+    """It used to return False, which `deliver` couldn't tell apart from "this
+    channel had nothing to do" — so a phone push that had never been configured
+    looked exactly like one that worked.
 
     The delenv is load-bearing, not tidiness: `ada.config` calls `load_dotenv()`
     at import, so a real ADA_NTFY_TOPIC from the developer's own .env is live in
@@ -122,7 +124,10 @@ def test_ntfy_is_skipped_when_no_topic_is_configured(monkeypatch):
     """
     monkeypatch.delenv("ADA_NTFY_TOPIC", raising=False)
 
-    assert notify._send_ntfy("hi", {"ntfy_topic": "  "}, False) is False
+    with pytest.raises(notify.ChannelUnavailable) as raised:
+        notify._send_ntfy("hi", {"ntfy_topic": "  "}, False)
+
+    assert "ADA_NTFY_TOPIC" in str(raised.value), "the message has to name the fix"
 
 
 def test_macos_channel_passes_text_as_an_argument_not_as_script_source(monkeypatch):
@@ -273,7 +278,61 @@ def test_a_blank_topic_sends_nothing_rather_than_posting_to_a_bare_host(monkeypa
     """Posting to https://ntfy.sh/ with no topic is a request to a stranger."""
     monkeypatch.setenv("ADA_NTFY_TOPIC", "   ")
 
-    assert notify._send_ntfy("x", {}, False) is False
+    with pytest.raises(notify.ChannelUnavailable):
+        notify._send_ntfy("x", {}, False)
+
+
+# --- knowing before you needed it -------------------------------------------
+
+
+def test_an_inert_channel_is_reported_and_does_not_stop_the_others(monkeypatch, capsys):
+    monkeypatch.delenv("ADA_NTFY_TOPIC", raising=False)
+    monkeypatch.setattr(notify, "_CHANNELS", {"ntfy": notify._send_ntfy, "terminal": notify._send_terminal})
+    monkeypatch.setattr(notify, "load_config", lambda: _config(channels=["ntfy", "terminal"]))
+
+    assert notify.deliver(_notice()) is True, "the terminal still took it"
+
+    out = capsys.readouterr().out
+    assert "can't send" in out
+    assert "ADA_NTFY_TOPIC" in out
+
+
+def test_an_inert_channel_reads_differently_from_a_broken_one(monkeypatch, capsys):
+    """Nothing is wrong with an unconfigured channel — it was never set up, and
+    the fix is a line of config rather than an investigation."""
+    def broken(_text, _settings, _urgent):
+        raise RuntimeError("the phone is off")
+
+    monkeypatch.setattr(notify, "_CHANNELS", {"ntfy": broken})
+    monkeypatch.setattr(notify, "load_config", lambda: _config(channels=["ntfy"]))
+    notify.deliver(_notice())
+
+    assert "couldn't notify via ntfy" in capsys.readouterr().out
+
+
+def test_unavailable_channels_answers_the_question_without_sending(monkeypatch):
+    """'Is my alerting working?' should be answerable before the alert you
+    needed, not after it didn't arrive."""
+    monkeypatch.delenv("ADA_NTFY_TOPIC", raising=False)
+    monkeypatch.setattr(notify, "load_config", lambda: _config(channels=["terminal", "ntfy"]))
+
+    broken = dict(notify.unavailable_channels())
+
+    assert "terminal" not in broken
+    assert "ADA_NTFY_TOPIC" in broken["ntfy"]
+
+
+def test_a_configured_channel_is_not_reported_as_broken(monkeypatch):
+    monkeypatch.setenv("ADA_NTFY_TOPIC", "a-real-topic")
+    monkeypatch.setattr(notify, "load_config", lambda: _config(channels=["terminal", "ntfy"]))
+
+    assert notify.unavailable_channels() == []
+
+
+def test_a_channel_name_that_does_not_exist_is_reported_too(monkeypatch):
+    monkeypatch.setattr(notify, "load_config", lambda: _config(channels=["carrier-pigeon"]))
+
+    assert notify.unavailable_channels() == [("carrier-pigeon", "not a channel Ada knows about")]
 
 
 def test_a_critical_notice_is_marked_urgent_to_the_phone(monkeypatch):

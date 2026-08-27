@@ -33,7 +33,7 @@ run, the same bargain `notify.deliver` makes with its channels.
 
 import time
 
-from ada import approvals, settings, when
+from ada import approvals, notify, settings, when
 from ada.heartbeat.notices import list_notices
 from ada.tools import calendar_tool, reminders, weather
 
@@ -55,6 +55,21 @@ def _end_of_today() -> float:
     """
     midnight = settings.now().replace(hour=23, minute=59, second=59, microsecond=0)
     return midnight.timestamp()
+
+
+def _alerting() -> list[str]:
+    """Notification channels that are configured but can't send.
+
+    First in the brief, ahead even of blocked work, because it is the one item
+    that bears on whether you are seeing any of the rest. A phone push that was
+    never really configured looks exactly like one that works until the morning
+    it mattered, and `deliver` can only say so into a log — which on the launchd
+    daemon is a file nobody reads.
+    """
+    broken = notify.unavailable_channels()
+    if not broken:
+        return []
+    return ["Alerting is degraded:", *(f"  - {channel}: {why}" for channel, why in broken)]
 
 
 def _blocked() -> list[str]:
@@ -144,9 +159,11 @@ def _weather() -> list[str]:
     return [f"Weather: {weather.get_weather(location)}"]
 
 
-# Order is the point: blocked work, then the parts of today that have a clock
-# attached, then things merely worth knowing.
+# Order is the point: whether you can be reached at all, then blocked work,
+# then the parts of today that have a clock attached, then things merely worth
+# knowing.
 SECTIONS = (
+    ("notification channels", _alerting),
     ("blocked work", _blocked),
     ("calendar", _calendar),
     ("reminders", _reminders),

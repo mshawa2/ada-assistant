@@ -2366,7 +2366,8 @@ one you'll skip, and this is meant to run every time you look at a holding.
 
 Everything Ada knew about a day already existed in five places — approvals,
 the calendar, reminders, the heartbeat's notices, the weather — and asking for
-all five was five questions whose answer was usually "nothing".
+all five was five questions whose answer was usually "nothing". A sixth section
+came later and leads: notification channels that can't actually send.
 
 `ada/brief.py` composes them. **No model call**: it takes 0.12s and costs
 nothing, which is the whole argument for it existing, because `schedules.py`
@@ -2421,6 +2422,32 @@ in full and the day after would quote that. `brief.PUSH_CHECK` lives in
 `brief.py` rather than the check module precisely so `_noticed` can filter it
 without a circular import. Posting today's also dismisses yesterday's, so a
 week of unread briefs can't stack up in a greeting meant for something else.
+
+### A channel that can't send says so
+
+`_send_ntfy` used to return `False` when no topic was configured, and
+`_send_macos` did the same with no `osascript`. `deliver` couldn't tell that
+apart from "this channel had nothing to do", so a phone push that had never
+really been set up looked exactly like one that worked — right up until the
+morning it mattered. Found while verifying the first real push: `deliver()`
+returned `True`, which proves only that *some* channel took it, and the
+terminal channel always does.
+
+`ChannelUnavailable` splits the case out. It's a distinct exception rather than
+a return value because it isn't a fault — nothing broke, something was never
+set up — and the fix is a line of config rather than an investigation, so it
+reads differently in the log and names the setting to change.
+
+It deliberately does **not** make `deliver` return False. The notice was still
+dealt with by whatever channels do work, and returning False would have
+`flush_pending_pushes` retrying it on every tick forever.
+
+Which is the whole reason `unavailable_channels()` exists: "is my alerting
+working?" has to be answerable *before* the alert you needed, without sending
+anything, and the daily brief leads with the answer when it's no. That
+placement is the point — on the launchd daemon, `deliver` printing into
+`heartbeat.out` is a log nobody reads, so a warning that only lives there is
+the same silent failure wearing a hat.
 
 **Restarting the daemon is part of deploying a new check.** `CHECKS` is built
 at import, and `loop._run_due_checks` skips any name not in it, so a running
