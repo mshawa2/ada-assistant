@@ -72,10 +72,19 @@ appear until you allow it**: macOS asks once, and for a launchd agent the
 prompt is attributed to Script Editor / osascript rather than to Ada. Check
 System Settings → Notifications if you never see one.
 
-For phone push, set `notifications.ntfy_topic` to an unguessable string and
-subscribe to the same topic in the [ntfy](https://ntfy.sh) app. That topic
-name is effectively a shared secret — anyone who knows it can read your
-notices, so don't pick `ada`.
+For phone push, put an unguessable string in `ADA_NTFY_TOPIC` in `.env` and
+subscribe to the same topic in the [ntfy](https://ntfy.sh) app. That topic name
+is effectively a shared secret — anyone who knows it can read your notices and
+post to them, so don't pick `ada`. **Use the environment, not
+`notifications.ntfy_topic` in `ada_config.json`**: that file is tracked in git,
+and the env var takes precedence for exactly this reason. The config key still
+works as a fallback.
+
+The daily brief is pushed here too, once each morning — see "The day in one
+call" in AGENT.md. It's on by default at 08:00. The time is
+`heartbeat.checks.morning_brief.at` in `ada_config.json`, and `enabled: false`
+turns it off. **Adding or enabling a check needs the agent restarted** — the
+config reloads every tick, the check registry doesn't.
 
 ## Gotchas worth knowing
 

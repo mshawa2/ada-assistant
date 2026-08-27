@@ -2362,6 +2362,71 @@ with nothing set is not actionable; "four holdings worth $5,310" is.
 No model call anywhere in it. An analysis you have to pay for and wait on is
 one you'll skip, and this is meant to run every time you look at a holding.
 
+## The day in one call, and a morning push
+
+Everything Ada knew about a day already existed in five places — approvals,
+the calendar, reminders, the heartbeat's notices, the weather — and asking for
+all five was five questions whose answer was usually "nothing".
+
+`ada/brief.py` composes them. **No model call**: it takes 0.12s and costs
+nothing, which is the whole argument for it existing, because `schedules.py`
+could already have fired "give me a morning briefing" as a job and that would
+have been a few cents a day to assemble something arithmetic can assemble, and
+would have depended on the model remembering to call five tools in order.
+
+Two rules the sections follow, and the second is the load-bearing one:
+
+- **Quiet when there's nothing.** Empty sections print no heading; an empty day
+  is one line. The same contract `greeting.startup_summary` keeps.
+- **Loud when broken.** A section that raises is reported in place rather than
+  dropped, because omitting the calendar renders as "you have nothing on today"
+  — a brief confidently telling you your morning is free is worse than no brief
+  at all. Same bargain `notify.deliver` makes with its channels.
+
+The window is now-to-midnight, not the whole day: a brief read at two in the
+afternoon that leads with the nine o'clock standup is reporting history.
+Overdue reminders are the deliberate exception. Undated reminders are counted,
+not listed, and only as a footnote to something actually due.
+
+### The push (`ada/heartbeat/brief_check.py`)
+
+The point of the brief is the morning you *don't* think to ask, and — since
+ntfy went on — the morning you aren't at the Mac at all.
+
+It's a heartbeat check rather than a schedule, for the cost reason above, but
+it borrows the one part of `schedules.py` worth borrowing: `next_run` is a pure
+function on a spec dict, so "next 08:00 in the user's own timezone" is the
+already-tested arithmetic rather than a second copy of it. No schedule and no
+job is created.
+
+Three things it refuses to do, each of which is a way this feature could have
+become one you turn off:
+
+1. **Fire on the tick it's enabled.** A first run with no state arms for the
+   next occurrence. Turning it on at three in the afternoon must not produce a
+   "morning" brief at three in the afternoon.
+2. **Fire late.** A missed morning collapses to one brief, not one per missed
+   day — the promise `schedules.py` already makes. But past `catch_up_hours`
+   (default 4) it is skipped and re-armed, because a push saying "here's your
+   morning" at ten at night is how someone learns to mute notifications. It
+   re-arms *before* the catch-up test, so a skip can't become permanent.
+3. **Say nothing loudly.** An empty brief isn't pushed. A daily notification
+   whose usual content is "nothing" trains you to swipe it away unread, which
+   costs you the morning it isn't. `push_when_empty` opts back in.
+
+It posts through `add_notice`, which buys quiet-hours hold-and-retry and the
+greeting for free. That creates one problem worth naming: the brief is now
+itself a notice, so without an exclusion tomorrow's brief would quote today's
+in full and the day after would quote that. `brief.PUSH_CHECK` lives in
+`brief.py` rather than the check module precisely so `_noticed` can filter it
+without a circular import. Posting today's also dismisses yesterday's, so a
+week of unread briefs can't stack up in a greeting meant for something else.
+
+**Restarting the daemon is part of deploying a new check.** `CHECKS` is built
+at import, and `loop._run_due_checks` skips any name not in it, so a running
+launchd agent ignores a check added underneath it — config reloads every tick,
+the check registry does not.
+
 ## Consolidation notes
 
 The sections above are in **build order**, not importance order — each records

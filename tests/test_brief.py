@@ -1,8 +1,8 @@
 """The daily brief: what it says, what it stays quiet about, and — the part
 that actually matters — what it does when a section is broken."""
 
-import time
-from datetime import datetime, timedelta
+from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,20 +28,32 @@ class FakeEvent:
         return self._start
 
 
+# Every time in this file is relative to noon *today*, and the brief is told
+# that noon is now. Without that these tests pass all day and fail after ten at
+# night, when "due in two hours" stops being today — the same trap conftest
+# already guards against for quiet hours. Real today, so `_end_of_today` is
+# left doing its own arithmetic rather than being stubbed out.
+NOON = settings.now().replace(hour=12, minute=0, second=0, microsecond=0)
+
+
 @pytest.fixture(autouse=True)
-def no_calendar_and_no_weather(monkeypatch):
+def a_quiet_noon(monkeypatch):
     """Neutral defaults, so each test opts into exactly the section it's about.
 
-    The real versions talk to EventKit and to Open-Meteo. A test suite that
-    reaches either is a test suite that fails on a machine with no Calendar
+    The real calendar and weather talk to EventKit and to Open-Meteo. A test
+    suite that reaches either is one that fails on a machine with no Calendar
     permission and no network.
     """
+    # `brief.time`, not `brief.time.time` — the latter is the stdlib module
+    # attribute, so patching it would move the clock for the whole process.
+    monkeypatch.setattr(brief, "time", SimpleNamespace(time=lambda: NOON.timestamp()))
     monkeypatch.setattr(brief.calendar_tool, "_events_between", lambda start, end: [])
     monkeypatch.setattr(brief.weather, "get_weather", lambda location: f"fine in {location}")
 
 
 def _iso(**delta):
-    return (datetime.now() + timedelta(**delta)).strftime("%Y-%m-%dT%H:%M:%S")
+    """An ISO time offset from the pinned noon, not from the wall clock."""
+    return (NOON + timedelta(**delta)).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 # --- quiet when there's nothing ---------------------------------------------
@@ -79,6 +91,18 @@ def test_blocked_work_comes_before_everything_else(monkeypatch):
     assert "Job #7: buy the thing" in result
 
 
+def test_this_mornings_pushed_brief_is_not_quoted_inside_the_next_one():
+    """The brief is pushed as a notice, so without the exclusion tomorrow's
+    brief would quote today's in full, and the day after would quote that."""
+    notices.add_notice(brief.PUSH_CHECK, "yesterday's whole brief", level="urgent")
+    notices.add_notice("portfolio", "SKWD arrived with no stop", level="urgent")
+
+    result = brief.compose()
+
+    assert "yesterday's whole brief" not in result
+    assert "SKWD arrived with no stop" in result
+
+
 def test_an_approval_is_not_reported_twice(monkeypatch):
     """`park` writes a notice *and* blocks the job. Both sections can see it;
     only the blocked one should say it."""
@@ -109,12 +133,12 @@ def test_the_calendar_window_starts_now_not_at_midnight(monkeypatch):
 
     brief.compose()
 
-    assert seen["start"] == pytest.approx(time.time(), abs=5)
+    assert seen["start"] == pytest.approx(NOON.timestamp())
     assert seen["end"] == pytest.approx(brief._end_of_today())
 
 
 def test_todays_events_are_listed_with_their_times(monkeypatch):
-    start = time.time() + 3600
+    start = NOON.timestamp() + 3600
     monkeypatch.setattr(brief.calendar_tool, "_events_between", lambda s, e: [FakeEvent("standup", start)])
 
     result = brief.compose()

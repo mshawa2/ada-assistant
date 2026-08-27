@@ -6,6 +6,7 @@ surfacing — most runs should produce nothing.
 import time
 
 from ada import store
+from ada.heartbeat.brief_check import check_morning_brief
 from ada.heartbeat.executor import run_jobs
 from ada.heartbeat.scheduler import run_schedules
 from ada.heartbeat.notices import add_notice
@@ -114,4 +115,8 @@ CHECKS = {
     # Off by default in ada_config.json: it merges into the positions every
     # alert runs on, and that's worth watching once before it runs unattended.
     "sync_portfolio": check_sync,
+    # Not an observation either: it pushes the day's brief once each morning.
+    # Deterministic and free, like `positions` — a summary you have to pay a
+    # model call for is one you'd think twice about scheduling daily.
+    "morning_brief": check_morning_brief,
 }

@@ -39,6 +39,11 @@ from ada.tools import calendar_tool, reminders, weather
 
 NOTHING = "Nothing needing you right now: no blocked work, nothing left on the calendar today, no reminders due."
 
+# The check that pushes this every morning (ada/heartbeat/brief_check.py). The
+# name lives here rather than there so `_noticed` can exclude it without
+# importing the module that imports this one.
+PUSH_CHECK = "morning_brief"
+
 
 def _end_of_today() -> float:
     """Midnight tonight, in the user's configured timezone, as epoch seconds.
@@ -115,8 +120,12 @@ def _noticed() -> list[str]:
     Approval notices are dropped: `_blocked` is the authoritative account of
     those, and saying the same sentence twice in one brief reads like a bug —
     the same fix `greeting.startup_summary` already carries.
+
+    This morning's pushed brief is dropped for a sharper reason: it is itself a
+    notice, so without this tomorrow's brief would quote today's in full, and
+    the day after would quote that.
     """
-    unseen = [n for n in list_notices() if n["check"] != approvals.NOTICE_CHECK]
+    unseen = [n for n in list_notices() if n["check"] not in (approvals.NOTICE_CHECK, PUSH_CHECK)]
     if not unseen:
         return []
     return ["Ada noticed:", *(f"  - {n['text']}" for n in unseen)]
