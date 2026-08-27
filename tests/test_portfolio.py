@@ -461,6 +461,52 @@ def test_a_vanished_holding_is_raised_as_a_possible_sync_fault(
     assert "sync fault" in text
 
 
+def test_a_holding_that_stays_missing_is_only_raised_once(
+    monkeypatch, broker, keyed, sent_notifications
+):
+    """The bug this replaced: a symbol the broker stopped reporting keeps not
+    being reported, so every tick wrote the same sentence again. Twenty-one
+    undismissed notices, twenty of them the same one — enough to bury the one
+    that was different."""
+    from ada.heartbeat import notices, sync_check
+
+    monkeypatch.setattr(sync_check, "market_open", lambda now=None: True)
+    sync_check.check_sync({})
+    broker["positions"] = []
+    sync_check.check_sync({})
+    for notice in notices.list_notices():
+        notices.dismiss_notice(notice["id"])
+
+    for _ in range(5):
+        sync_check.check_sync({})
+
+    assert notices.list_notices() == [], "still missing is not new information"
+
+
+def test_a_holding_that_comes_back_and_vanishes_again_is_raised_again(
+    monkeypatch, broker, keyed, sent_notifications
+):
+    """The state records the current missing set rather than everything ever
+    missed, so the guard suppresses repetition without suppressing recurrence."""
+    from ada.heartbeat import notices, sync_check
+
+    monkeypatch.setattr(sync_check, "market_open", lambda now=None: True)
+    original = list(broker["positions"])
+    sync_check.check_sync({})
+
+    broker["positions"] = []
+    sync_check.check_sync({})
+    broker["positions"] = original
+    sync_check.check_sync({})
+    for notice in notices.list_notices():
+        notices.dismiss_notice(notice["id"])
+
+    broker["positions"] = []
+    sync_check.check_sync({})
+
+    assert "no longer reports" in notices.list_notices()[0]["text"]
+
+
 # --- the dashboard ----------------------------------------------------------
 
 

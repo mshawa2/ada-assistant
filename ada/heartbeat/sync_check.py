@@ -19,6 +19,9 @@ a sale.
 from ada import brokerage, portfolio
 from ada.heartbeat.notices import add_notice
 from ada.heartbeat.positions_check import market_open
+from ada.heartbeat.state import get_check_state, update_check_state
+
+CHECK_NAME = "sync"
 
 
 def check_sync(params: dict) -> None:
@@ -46,10 +49,26 @@ def check_sync(params: dict) -> None:
             level=params.get("level", "urgent"),
         )
 
-    if result.get("missing"):
+    # `missing` is *permanent state*, not an event: a symbol the broker stopped
+    # reporting keeps not being reported, so noticing it on every tick wrote the
+    # same sentence into the log every five minutes all day. Only what is newly
+    # missing since the last sync is news.
+    #
+    # `added` needs no such guard — it is an event by construction, since a
+    # position that arrived is present on the next sync and so never appears in
+    # `added` twice.
+    missing = set(result.get("missing") or [])
+    already_reported = set(get_check_state(CHECK_NAME).get("reported_missing", []))
+    newly_missing = sorted(missing - already_reported)
+
+    # The whole current set is stored, not the union with what came before, so a
+    # holding that reappears and later vanishes again is reported again.
+    update_check_state(CHECK_NAME, reported_missing=sorted(missing))
+
+    if newly_missing:
         add_notice(
             "portfolio",
-            f"Your broker no longer reports {', '.join(result['missing'])}. "
+            f"Your broker no longer reports {', '.join(newly_missing)}. "
             "Still tracked in case that's a sync fault — tell me if you sold them.",
             level=params.get("level", "urgent"),
         )

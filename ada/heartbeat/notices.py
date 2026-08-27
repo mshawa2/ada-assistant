@@ -24,6 +24,20 @@ def _save(notices: list[dict]) -> None:
 
 
 def add_notice(check: str, text: str, level: str = "normal") -> dict:
+    """Log something worth telling the user, and push it if the level says so.
+
+    Deliberately *not* deduplicated. It looks like it should be — `sync_check`
+    once reported a holding the broker had stopped listing on every tick and
+    the log reached twenty-one notices, twenty of them the same sentence — but
+    dropping a notice identical to one already undismissed breaks the checks
+    that repeat on purpose. A stop that is hit, clears, and is hit again, and a
+    reminder snoozed and come due again, both raise the same words twice, and
+    both times the second one is a real event rather than an echo.
+
+    Repetition can't be told from recurrence here, only at the check, which
+    knows whether it is reporting a condition or an event. `sync_check` tracks
+    its own reported set for exactly that reason.
+    """
     if level not in LEVELS:
         raise ValueError(f"Unknown notice level '{level}'.")
     with _lock:
