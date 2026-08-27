@@ -7,7 +7,7 @@ reached by accident, and nothing anywhere can place an order.
 
 import pytest
 
-from ada import analyst, budget, debate, positions, tradingagents
+from ada import analyst, budget, debate, positions
 from tests.conftest import FakeBlock, FakeMessage
 
 
@@ -162,62 +162,6 @@ def test_a_ticker_is_required():
         analyst.analyze("  ")
 
 
-# --- the outside framework, kept outside ------------------------------------
-
-
-def test_tradingagents_is_not_importable_from_ada():
-    """111 packages that must never be able to break `import ada`."""
-    with pytest.raises(ImportError):
-        __import__("tradingagents.graph.trading_graph")
-
-
-def test_an_uninstalled_framework_explains_itself_rather_than_failing(monkeypatch):
-    monkeypatch.setattr(tradingagents, "installed", lambda: False)
-
-    with pytest.raises(tradingagents.NotInstalled) as caught:
-        tradingagents.run("NVDA", "2026-08-24")
-
-    assert "install_tradingagents.sh" in str(caught.value)
-    assert "not counted against Ada's budget" in str(caught.value)
-
-
-def test_the_tool_passes_setup_instructions_through(monkeypatch):
-    from ada.tools import research_tool
-
-    monkeypatch.setattr(tradingagents, "installed", lambda: False)
-
-    assert "install_tradingagents.sh" in research_tool.tradingagents_report("NVDA")
-
-
-def test_a_framework_that_breaks_comes_back_as_a_result_not_a_traceback(monkeypatch):
-    import subprocess
-
-    monkeypatch.setattr(tradingagents, "installed", lambda: True)
-
-    def times_out(*a, **k):
-        raise subprocess.TimeoutExpired("cmd", 900)
-
-    monkeypatch.setattr(subprocess, "run", times_out)
-    result = tradingagents.run("NVDA", "2026-08-24")
-
-    assert result["ok"] is False
-    assert "didn't finish" in result["error"]
-
-
-def test_output_without_the_marker_is_reported_not_parsed(monkeypatch):
-    import subprocess
-
-    monkeypatch.setattr(tradingagents, "installed", lambda: True)
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda *a, **k: subprocess.CompletedProcess(a, 1, stdout="noise", stderr="ImportError: no key"),
-    )
-
-    result = tradingagents.run("NVDA", "2026-08-24")
-
-    assert result["ok"] is False
-    assert "no key" in result["error"]
-
 
 # --- the line that doesn't move ---------------------------------------------
 
@@ -237,7 +181,6 @@ def test_the_expensive_tools_say_what_they_cost():
     assert "$1.00" in priced["analyze_ticker"]
     assert "$0.20" in priced["market_scan"]
     assert "check_price is instant and free" in priced["analyze_ticker"]
-    assert "NOT counted against Ada's budget" in priced["tradingagents_report"]
 
 
 def test_the_tool_registry_can_be_imported_before_the_agent():

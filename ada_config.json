@@ -116,11 +116,6 @@
         "per_hour": 8,
         "per_day": 24
       },
-      "tradingagents_report": {
-        "per_minute": 1,
-        "per_hour": 3,
-        "per_day": 8
-      },
       "sync_portfolio": {
         "per_minute": 2,
         "per_hour": 20,

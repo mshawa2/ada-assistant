@@ -152,7 +152,6 @@ DEFAULTS: dict[str, Any] = {
             # rather than a safety rail.
             "sync_portfolio": {"per_minute": 2, "per_hour": 20, "per_day": 200},
             "account_activity": {"per_minute": 3, "per_hour": 30},
-            "tradingagents_report": {"per_minute": 1, "per_hour": 3, "per_day": 8},
         },
     },
     "purchasing": {

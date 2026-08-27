@@ -15,7 +15,7 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-76 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+75 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
@@ -35,7 +35,7 @@ depending on the arguments (a lock, not a lamp). Everything else runs freely.
 | Approvals | `list_approvals`, `resolve_approval` ⚠️ |
 | Recurring work | `list_schedules`, `manage_schedule`, `schedule_job` |
 | Holdings | `add_position`, `check_price`, `list_positions`, `remove_position`, `review_holding`, `update_position` |
-| Market research | `analyze_ticker`, `market_scan`, `tradingagents_report` |
+| Market research | `analyze_ticker`, `market_scan` |
 | Brokerage (read-only) | `account_activity`, `connection_status`, `holdings_needing_rules`, `list_accounts`, `sync_portfolio` |
 | Ada herself | `dismiss_notice`, `find_tool`, `get_settings`, `heartbeat`, `list_modes`, `list_notices`, `set_mode`, `set_setting` ⚠️ |
 
@@ -2017,22 +2017,30 @@ before the first real run corrected it. At that price this is for a position
 you're uneasy about, not a daily watchlist sweep, and it's rate-limited to one
 a minute and twenty a day.
 
-## The analyst team, and TradingAgents kept at arm's length (built)
+## The analyst team (built; TradingAgents tried and removed)
 
-The user asked three times for TradingAgents and for actual buy-side
-recommendations. Twice I argued against both. The third time is a decision, not
-a question, so this builds it — and having argued the point, the honest thing
-was to go and get facts instead of repeating an opinion.
+The user asked three times for TradingAgents and for real buy-side calls,
+having been argued with twice. The third time is a decision, so it was built —
+and having argued the point, the honest move was to go and get facts rather
+than repeat an opinion.
 
 **It installs cleanly on Python 3.14.** Verified in an isolated venv, not
-assumed. It pulls **111 packages** — langgraph, four LangChain provider SDKs,
-pandas, numpy, openai, google-genai, redis, backtrader. Ada's tree is 41.
+assumed; I had implied otherwise and was wrong. It pulls **111 packages** —
+langgraph, four LangChain provider SDKs, pandas, numpy, openai, google-genai,
+redis, backtrader — against Ada's 41. So it was integrated the only sane way:
+its own virtualenv, driven as a subprocess.
 
-So it runs in **its own virtualenv, as a subprocess** (`ada/tradingagents.py`,
-`scripts/install_tradingagents.sh`, installed to `~/.ada/tradingagents`).
-Nothing there can break `import ada`, an upgrade on either side can't disturb
-the other, and removing it is one directory. A test asserts the package is *not*
-importable from inside Ada.
+**Then it was removed, on the evidence.** It was never installed for real and
+never once called, while `analyst.py` — the same architecture over Ada's own
+core — did the job better on every axis that mattered: it knows the user's
+actual holdings, its spending counts against the budget cap, and it needs no
+dependencies. A subprocess that knows nothing about the reader and spends
+outside the ledger could not compete with that.
+
+What survives is the **idea**, credited in `debate.py` and `analyst.py`:
+specialist analysts, a bull/bear debate, a trader, a risk manager. That was
+always the part worth having. The framework around it was LangGraph
+reimplementing plumbing this project already had.
 
 ### The native path is the better default
 

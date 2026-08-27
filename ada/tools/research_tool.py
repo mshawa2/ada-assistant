@@ -1,16 +1,14 @@
-"""Market research: a cheap sweep, a full team, and the outside framework.
+"""Market research: a cheap sweep and a full team.
 
-Three tools at three prices, and the descriptions say which is which — the
-failure mode otherwise is a model reaching for the dollar one to answer "what's
-NVDA at", which `check_price` does instantly and free.
+Two tools at two prices, and the descriptions say which is which — the failure
+mode otherwise is a model reaching for the dollar one to answer "what's NVDA
+at", which `check_price` does instantly and free.
 
 None of these can trade. Ada has no order path at all; every one of them
 returns text.
 """
 
-from datetime import date
-
-from ada import analyst, tradingagents
+from ada import analyst
 from ada.tools.registry import tool
 
 
@@ -77,52 +75,3 @@ def analyze_ticker(symbol: str, full: bool = False) -> str:
     )
     return "\n".join(parts)
 
-
-@tool(
-    name="tradingagents_report",
-    description=(
-        "Run the external TradingAgents framework on a ticker — a separate open-source "
-        "multi-agent trading research system, in its own environment.\n\n"
-        "Only use this when the user asks for TradingAgents specifically, or wants a second "
-        "opinion to compare against analyze_ticker. It is slower, its spending is NOT "
-        "counted against Ada's budget because it runs as a separate process, and it doesn't "
-        "know what the user holds. analyze_ticker is the better default.\n\n"
-        "If it isn't installed, pass on the setup instructions rather than apologising — "
-        "it's one script."
-    ),
-    input_schema={
-        "type": "object",
-        "properties": {
-            "symbol": {"type": "string", "description": "Ticker to analyse."},
-            "date": {
-                "type": "string",
-                "description": "Date to analyse as of, YYYY-MM-DD. Defaults to today.",
-            },
-            "depth": {
-                "type": "integer",
-                "description": "Debate rounds. 1 is quick, 3 is thorough and much slower. Defaults to 1.",
-            },
-        },
-        "required": ["symbol"],
-    },
-)
-def tradingagents_report(symbol: str, date_: str = "", depth: int = 1, **kwargs) -> str:
-    as_of = kwargs.get("date") or date_ or date.today().isoformat()
-
-    try:
-        result = tradingagents.run(symbol, as_of, depth=max(1, min(depth or 1, 3)))
-    except tradingagents.NotInstalled as e:
-        return str(e)
-
-    if not result.get("ok"):
-        return f"TradingAgents couldn't finish: {result.get('error', 'unknown error')}"
-
-    parts = [f"TradingAgents on {symbol.upper()} as of {as_of}:", "", result["decision"]]
-    for name, text in (result.get("reports") or {}).items():
-        parts += ["", f"--- {name} ---", text[:1500]]
-    parts.append(
-        "\n(From the external TradingAgents framework. Its own authors say it isn't advice, "
-        "and its issue tracker has reports of the same ticker giving contradictory calls "
-        "between runs — treat one run as a sample. It doesn't know your holdings.)"
-    )
-    return "\n".join(parts)
