@@ -9,7 +9,9 @@
   "locale": {
     "timezone": "",
     "time_format": "24h",
-    "units": "metric"
+    "units": "metric",
+    "location_source": "device",
+    "location": ""
   },
   "model": {
     "conversation": "claude-sonnet-5",

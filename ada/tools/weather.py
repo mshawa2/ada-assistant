@@ -73,9 +73,18 @@ def get_weather(location: str) -> str:
         raise ValueError(f"Couldn't find a place called '{location}'.")
 
     place = results[0]
-    lat, lon = place["latitude"], place["longitude"]
     label = ", ".join(part for part in (place.get("name"), place.get("admin1"), place.get("country")) if part)
+    return report_at(place["latitude"], place["longitude"], label)
 
+
+def report_at(lat: float, lon: float, label: str) -> str:
+    """The forecast for a point, skipping geocoding.
+
+    Split out so a device location — which already knows exactly where it is —
+    doesn't take a round trip to a geocoder to ask what its own coordinates are
+    called, and then get back a nearest-named-place answer that may be a
+    different suburb.
+    """
     forecast_params = {
         "latitude": lat,
         "longitude": lon,

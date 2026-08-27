@@ -655,7 +655,8 @@ both old files are gone (their contents carried over; recoverable from git).
 - **Modes** ship as `focus` (critical-only pushes, no note-watching),
   `weekend` (later quiet hours, no staleness nagging) and `away` (push to
   phone only).
-- **Locale** — `timezone`, `time_format`, `units`, `location`. A naive `due_at` is now read
+- **Locale** — `timezone`, `time_format`, `units`, `location`,
+  `location_source`, `location_shortcut`. A naive `due_at` is now read
   in the *configured* zone, so an always-on host in a different timezone still
   schedules "3pm" at 3pm where you are. An unknown zone warns and falls back
   rather than raising. `location` is a plain place name ("Austin, TX") and is
@@ -2388,6 +2389,49 @@ The window is now-to-midnight, not the whole day: a brief read at two in the
 afternoon that leads with the nine o'clock standup is reporting history.
 Overdue reminders are the deliberate exception. Undated reminders are counted,
 not listed, and only as a footnote to something actually due.
+
+### Weather, and why CoreLocation isn't in here
+
+`locale.location_source: "device"` makes the brief ask the Mac where it
+actually is instead of reading a fixed city.
+
+**CoreLocation was built first and cannot work.** Measured, not assumed:
+authorization stayed `notDetermined`, no prompt ever appeared, and the first
+fix returned `kCLErrorDomain Code=1` — `kCLErrorDenied`. That isn't an
+entitlement to go and add. macOS attributes a Location Services prompt to a
+signed app bundle carrying `NSLocationWhenInUseUsageDescription`, and Ada is a
+Python process started by launchd — the daemon that needs the location at 08:00
+is the least bundle-like part of the system. The dependency was installed,
+proved useless, and uninstalled; the shipped design adds none.
+
+**Shortcuts can, because the permission belongs to Shortcuts.** `shortcuts run`
+executes inside a signed bundle that *can* hold Location Services, so
+`ada/location.py` borrows its authorization rather than trying to obtain its
+own — the same move `home.py` makes to reach HomeKit, for the same reason. The
+cost is one manual setup step: importing an unsigned shortcut needs "Allow
+Untrusted Shortcuts", which is a worse thing to ask someone to enable than
+"build these two actions once". The instruction is in the error text rather
+than a README, because the moment you discover it isn't configured is the
+moment you want telling.
+
+Two things live testing caught that tests hadn't:
+
+- **A missing shortcut doesn't fail, it hangs.** `shortcuts run` on a name that
+  doesn't exist sits there until the timeout, so the brief spent 20s and then
+  blamed a slow indoor fix for a shortcut nobody had created. The name is
+  checked against `shortcuts list` first; the same case now takes 0.13s and
+  says what to do.
+- **A fallback has to admit it's one.** If the device lookup fails and
+  `locale.location` is set, the brief uses it — travelling with a denied
+  permission should still tell you the weather at home rather than nothing —
+  but labelled, because "it's fine in Austin" is actively misleading when
+  you're in Berlin.
+
+Either shape of answer works: a shortcut ending in *Get Details of Location →
+City* returns a place name and gets geocoded, one returning the location itself
+stringifies to coordinates and goes straight to the forecast. Being forgiving
+costs a regex and saves rebuilding a shortcut because Ada wanted the other
+format.
 
 ### The push (`ada/heartbeat/brief_check.py`)
 

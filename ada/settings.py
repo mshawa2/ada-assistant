@@ -67,6 +67,11 @@ DEFAULTS: dict[str, Any] = {
         # weather out — inferring it from the machine's IP would send an address
         # to a third party nobody asked about, and be wrong on a VPN besides.
         "location": "",
+        # "config" uses `location` above. "device" asks the Mac where it is via
+        # a Shortcut (see ada/location.py — CoreLocation can't work from an
+        # unbundled process), falling back to `location` if that fails.
+        "location_source": "config",
+        "location_shortcut": "",
     },
     "model": {
         "conversation": "claude-sonnet-5",

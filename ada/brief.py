@@ -33,7 +33,7 @@ run, the same bargain `notify.deliver` makes with its channels.
 
 import time
 
-from ada import approvals, notify, settings, when
+from ada import approvals, location, notify, settings, when
 from ada.heartbeat.notices import list_notices
 from ada.tools import calendar_tool, reminders, weather
 
@@ -146,17 +146,49 @@ def _noticed() -> list[str]:
     return ["Ada noticed:", *(f"  - {n['text']}" for n in unseen)]
 
 
-def _weather() -> list[str]:
-    """Skipped entirely unless `locale.location` is set.
+def _device_weather() -> str:
+    """The forecast for wherever this Mac currently is.
 
-    Guessing the location from the machine's IP is the tempting alternative and
-    it's wrong twice over: it sends the user's address to a third party nobody
-    asked about, and it's confidently incorrect on a VPN.
+    A coordinate pair goes straight to the forecast; anything else is treated as
+    a place name and geocoded. See `ada/location.py` for why the shortcut exists
+    rather than CoreLocation.
     """
-    location = (settings.get("locale.location", "") or "").strip()
-    if not location:
+    answer = location.here()
+    point = location.looks_like_coordinates(answer)
+    if point:
+        return weather.report_at(point[0], point[1], "Where you are")
+    return weather.get_weather(answer)
+
+
+def _weather() -> list[str]:
+    """Device location if `locale.location_source` is "device", else the fixed
+    `locale.location`. Nothing at all if neither is configured.
+
+    Guessing from the machine's IP remains the tempting third option and is
+    still wrong twice over: it sends the user's address to a third party nobody
+    asked about, and it reports the VPN exit node rather than the user.
+
+    A device lookup that fails falls back to the fixed location when there is
+    one — travel with the Mac, and a denied permission still tells you the
+    weather at home rather than nothing. The fallback says it is one, because
+    "it's fine in Austin" is actively misleading when you're in Berlin.
+    """
+    fixed = (settings.get("locale.location", "") or "").strip()
+
+    if (settings.get("locale.location_source", "config") or "config").strip() == "device":
+        try:
+            return [f"Weather: {_device_weather()}"]
+        except location.LocationUnavailable as e:
+            if not fixed:
+                return [f"Weather: couldn't read this Mac's location — {e}"]
+            return [
+                f"Weather: couldn't read this Mac's location, so this is {fixed}, not necessarily where you are — {e}",
+                f"  {weather.get_weather(fixed)}",
+            ]
+
+    if not fixed:
         return []
-    return [f"Weather: {weather.get_weather(location)}"]
+    return [f"Weather: {weather.get_weather(fixed)}"]
 
 
 # Order is the point: whether you can be reached at all, then blocked work,
