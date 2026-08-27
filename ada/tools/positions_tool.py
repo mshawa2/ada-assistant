@@ -183,6 +183,65 @@ def check_price(symbol: str) -> str:
 
 
 @tool(
+    name="rule_options",
+    description=(
+        "Work out where a stop could go on a holding, and what each level would actually "
+        "bank if it fired. Use this whenever the user is deciding on a stop, asks where to "
+        "put one, or asks what they should do about a position they hold.\n\n"
+        "Instant and free — no research, just arithmetic on the live price. Always run "
+        "this before suggesting any level yourself.\n\n"
+        "Present the levels and what each keeps; do NOT pick one for them. The point is "
+        "that they choose knowing the consequence. If a level is already below the current "
+        "price, say plainly that setting it there fires the alert immediately."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {"symbol": {"type": "string", "description": "Ticker of a holding they own."}},
+        "required": ["symbol"],
+    },
+)
+def rule_options(symbol: str) -> str:
+    from ada import market, rules
+
+    try:
+        return rules.options_for(symbol)
+    except market.MarketError as e:
+        raise ValueError(f"Couldn't price {symbol.upper()}: {e}") from e
+
+
+@tool(
+    name="unguarded_holdings",
+    description=(
+        "List holdings with no stop and no written invalidation, ordered by how much money "
+        "is actually exposed. Use this when the user asks what needs attention, what's "
+        "unprotected, or where to start.\n\n"
+        "Better than a plain list of names: it says which one to do first. Lead with the "
+        "total exposed and the largest one or two, not the whole list."
+    ),
+    input_schema={"type": "object", "properties": {}, "required": []},
+)
+def unguarded_holdings() -> str:
+    from ada import rules
+
+    at_risk = rules.unguarded()
+    if not at_risk:
+        return "Every holding with a price has a rule on it."
+
+    total = sum(h["value"] for h in at_risk)
+    lines = [
+        f"{len(at_risk)} holdings worth {total:,.0f} have no rules — they'll be priced and "
+        "shown, and will never alert:"
+    ]
+    for h in at_risk[:12]:
+        gain = f"  ({h['gain']:+,.0f} unrealised)" if h["gain"] is not None else ""
+        lines.append(f"  {h['symbol']:<6} {h['value']:>9,.0f}{gain}")
+    if len(at_risk) > 12:
+        rest = sum(h["value"] for h in at_risk[12:])
+        lines.append(f"  ...and {len(at_risk) - 12} smaller, {rest:,.0f} between them")
+    return "\n".join(lines)
+
+
+@tool(
     name="review_holding",
     description=(
         "Run a full two-sided review of a stock: one researcher builds the strongest "

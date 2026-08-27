@@ -15,7 +15,7 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-75 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+77 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
@@ -34,7 +34,7 @@ depending on the arguments (a lock, not a lamp). Everything else runs freely.
 | Background jobs | `cancel_job`, `job_status`, `list_jobs`, `start_job` |
 | Approvals | `list_approvals`, `resolve_approval` ⚠️ |
 | Recurring work | `list_schedules`, `manage_schedule`, `schedule_job` |
-| Holdings | `add_position`, `check_price`, `list_positions`, `remove_position`, `review_holding`, `update_position` |
+| Holdings | `add_position`, `check_price`, `list_positions`, `remove_position`, `review_holding`, `rule_options`, `unguarded_holdings`, `update_position` |
 | Market research | `analyze_ticker`, `market_scan` |
 | Brokerage (read-only) | `account_activity`, `connection_status`, `holdings_needing_rules`, `list_accounts`, `sync_portfolio` |
 | Ada herself | `dismiss_notice`, `find_tool`, `get_settings`, `heartbeat`, `list_modes`, `list_notices`, `set_mode`, `set_setting` ⚠️ |
@@ -2314,6 +2314,40 @@ CLI was installed. The deeper problem was that they'd have passed or failed
 depending on whether the developer happened to have run `tvly login`. The
 autouse fixture now stubs `_tvly` rather than `tvly_ready`, which makes the
 suite deterministic *and* leaves the readiness check itself testable.
+
+## Choosing a stop, as arithmetic
+
+Setting rules on four large winners by hand turned up the thing the tools were
+missing. A stop is a **different instrument depending on where you are**: below
+your cost it caps a loss, above it it protects a gain — and the second case is
+the one people set badly, because the number that decides it is not "how far
+down is this level" but **"how much of my gain does it keep"**.
+
+`ada/rules.py` puts that arithmetic behind a tool. For a holding it lists the
+levels it actually has — its 50- and 200-day averages, its 52-week low, its
+cost, round percentages — and against each one:
+
+- **what it would bank**: `(level - cost) x shares`
+- **whether it's already breached**: a level above the current price fires the
+  moment it's set, which is worth knowing before rather than from the
+  notification a second later
+
+On a position up 481%, that turns "20% below" into "banks +1,187", and reveals
+that its 50-day is *above* the current price so a stop there fires at once.
+Neither fact is visible from a percentage.
+
+**It recommends nothing**, and a test asserts the output contains no
+"recommend", "you should", "best level" or "advise". The holder picks; this
+makes the picking informed. Winners are additionally offered a trailing rule,
+framed as the trade it is — a trail ratchets and doesn't need revisiting, a
+fixed stop is a decision re-made every time the price moves.
+
+`unguarded_holdings` ranks what has no rules **by money at stake** rather than
+listing names, because a list doesn't say which to do first. Forty-odd holdings
+with nothing set is not actionable; "four holdings worth $5,310" is.
+
+No model call anywhere in it. An analysis you have to pay for and wait on is
+one you'll skip, and this is meant to run every time you look at a holding.
 
 ## Consolidation notes
 
