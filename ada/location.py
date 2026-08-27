@@ -89,6 +89,56 @@ def _known_shortcuts() -> list[str]:
     return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
 
 
+def place_candidates(text: str) -> list[str]:
+    """Geocodable guesses at the place in `text`, best first.
+
+    "Stop and Output [Current Location]" returns a **postal address**, which is
+    the third shape this has to cope with and the one a real Mac actually
+    produced:
+
+        1234 N Sample Ave
+        Chicago IL 60601
+        United States
+
+    None of that geocodes. Measured against Open-Meteo: the whole string, the
+    "Chicago IL 60601" line and even "Chicago IL" all return nothing. Only
+    "Chicago" resolves. So the locality has to be dug out — postcodes and house
+    numbers dropped (anything containing a digit), and a trailing one- or
+    two-letter state code tried both ways, because "Chicago IL" fails where
+    "Chicago" works.
+
+    Lines are walked from the bottom up, skipping the last (the country), since
+    the locality sits nearer the end of an address than the start in every
+    format worth supporting. The country goes on the end as a last resort — a
+    forecast for the wrong end of the right country still beats no weather line
+    and a shrug.
+
+    Nothing here decides which candidate is *right*: the caller tries them in
+    order and the first that geocodes wins, and the forecast names the place it
+    resolved, so a bad guess is visible rather than silent.
+    """
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return lines
+
+    candidates = []
+    for line in reversed(lines[:-1]):
+        words = [word for word in line.split() if not any(c.isdigit() for c in word)]
+        if not words:
+            continue
+        candidates.append(" ".join(words))
+        if len(words) > 1 and len(words[-1]) <= 2:
+            candidates.append(" ".join(words[:-1]))
+    candidates.append(lines[-1])
+
+    seen, ordered = set(), []
+    for candidate in candidates:
+        if candidate.lower() not in seen:
+            seen.add(candidate.lower())
+            ordered.append(candidate)
+    return ordered
+
+
 def here() -> str:
     """Whatever the location shortcut returns, as text. Raises if it can't."""
     name = shortcut_name()

@@ -2427,11 +2427,28 @@ Two things live testing caught that tests hadn't:
   but labelled, because "it's fine in Austin" is actively misleading when
   you're in Berlin.
 
-Either shape of answer works: a shortcut ending in *Get Details of Location →
-City* returns a place name and gets geocoded, one returning the location itself
-stringifies to coordinates and goes straight to the forecast. Being forgiving
-costs a regex and saves rebuilding a shortcut because Ada wanted the other
-format.
+Three shapes of answer are accepted, and the third was a surprise. Coordinates
+go straight to the forecast; a place name gets geocoded; and *Stop and Output
+[Current Location]* — the obvious way to build the shortcut, and the way it
+actually got built — returns a **postal address**:
+
+```
+1234 N Sample Ave
+Chicago IL 60601
+United States
+```
+
+None of which geocodes. Measured against Open-Meteo: the whole string, the
+`Chicago IL 60601` line, and even `Chicago IL` all return nothing. Only
+`Chicago` resolves. So `place_candidates` digs the locality out — drops
+anything containing a digit, walks the lines bottom-up skipping the country,
+and tries a trailing two-letter state code both with and without. The caller
+takes the first candidate that geocodes, and the forecast names the place it
+resolved (`Chicago, Illinois, United States: 76.7°F…`), so a wrong guess is
+visible in the brief rather than silent.
+
+Being forgiving here is the difference between working and sending someone back
+to rebuild a shortcut they just built correctly.
 
 ### The push (`ada/heartbeat/brief_check.py`)
 

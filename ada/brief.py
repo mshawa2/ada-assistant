@@ -157,7 +157,18 @@ def _device_weather() -> str:
     point = location.looks_like_coordinates(answer)
     if point:
         return weather.report_at(point[0], point[1], "Where you are")
-    return weather.get_weather(answer)
+
+    # A postal address needs its locality dug out; see place_candidates. The
+    # first one the geocoder recognises wins, and the forecast names the place
+    # it resolved, so a wrong guess shows up in the brief instead of hiding.
+    for candidate in location.place_candidates(answer):
+        try:
+            return weather.get_weather(candidate)
+        except ValueError:
+            continue
+    raise location.LocationUnavailable(
+        f"'{location.shortcut_name()}' returned something the weather service didn't recognise as a place"
+    )
 
 
 def _weather() -> list[str]:

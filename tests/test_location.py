@@ -119,6 +119,67 @@ def test_the_shortcut_name_is_configurable():
     assert location.shortcut_name() == "Where Am I"
 
 
+# --- the third shape: a postal address ---------------------------------------
+
+ADDRESS = "1234 N Sample Ave\nChicago IL 60601\nUnited States"
+
+
+def test_a_postal_address_yields_the_locality_first():
+    """What a real Mac actually returns from 'Stop and Output [Current
+    Location]'. Measured against Open-Meteo: the whole string, the
+    'Chicago IL 60601' line and even 'Chicago IL' all geocode to nothing.
+    Only 'Chicago' resolves, so it has to be among the candidates."""
+    candidates = location.place_candidates(ADDRESS)
+
+    assert "Chicago" in candidates
+    assert candidates.index("Chicago") < candidates.index("N Sample Ave"), "the street is a last resort"
+    assert candidates[-1] == "United States", "the country is the final fallback, not the first guess"
+
+
+def test_house_numbers_and_postcodes_are_dropped():
+    assert not any(any(c.isdigit() for c in candidate) for candidate in location.place_candidates(ADDRESS))
+
+
+def test_a_single_line_answer_is_left_alone():
+    assert location.place_candidates("Austin, TX") == ["Austin, TX"]
+    assert location.place_candidates("") == []
+
+
+def test_candidates_are_not_repeated():
+    candidates = location.place_candidates("Berlin\nBerlin\nGermany")
+
+    assert len(candidates) == len(set(c.lower() for c in candidates))
+
+
+def test_the_first_candidate_that_geocodes_wins(monkeypatch):
+    tried = []
+
+    def geocode(place):
+        tried.append(place)
+        if place != "Chicago":
+            raise ValueError(f"Couldn't find a place called '{place}'.")
+        return "Chicago: mild"
+
+    monkeypatch.setattr(location, "here", lambda: ADDRESS)
+    monkeypatch.setattr(brief.weather, "get_weather", geocode)
+    settings.set_path("locale.location_source", "device")
+
+    assert "Chicago: mild" in brief.compose()
+    assert tried[0] == "Chicago IL", "the fuller form is tried before the barer one"
+    assert "N Sample Ave" not in tried, "it stopped as soon as one worked"
+
+
+def test_an_address_that_geocodes_to_nothing_at_all_is_reported(monkeypatch):
+    def never(place):
+        raise ValueError("nope")
+
+    monkeypatch.setattr(location, "here", lambda: ADDRESS)
+    monkeypatch.setattr(brief.weather, "get_weather", never)
+    settings.set_path("locale.location_source", "device")
+
+    assert "didn't recognise as a place" in brief.compose()
+
+
 # --- what the brief does with it --------------------------------------------
 
 
