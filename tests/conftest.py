@@ -18,6 +18,21 @@ os.environ["ADA_DATA_DIR"] = str(TEST_DATA_DIR)
 # user's real ~/Vault — the one they have open in Obsidian.
 TEST_VAULT_DIR = Path(tempfile.mkdtemp(prefix="ada-tests-vault-"))
 os.environ["ADA_VAULT_DIR"] = str(TEST_VAULT_DIR)
+
+# Credentials for outside services are *removed*, not redirected. An
+# integration treats their presence as "this is configured, go and ask", so a
+# developer with a working .env would have had the suite making real calls to
+# live services — slow, dependent on someone else's uptime, and reading real
+# data into test assertions. A test that wants that path fakes
+# `is_configured`; nothing gets there by accident.
+#
+# Set to empty rather than deleted, and that distinction is the whole trick:
+# `ada.config` calls `load_dotenv()` at import time, which fills in any key
+# *missing* from the environment. Deleting them here would hand them straight
+# back a moment later. An empty string is already present, so dotenv leaves it
+# alone, and every `is_configured()` reads it as falsy.
+for _key in ("IMAP_PASSWORD"):
+    os.environ[_key] = ""
 # Only so importing ada.config doesn't sys.exit on a machine without a .env.
 # Nothing here makes a real API call — the model seam is always faked.
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-never-used")
