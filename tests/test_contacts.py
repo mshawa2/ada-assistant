@@ -175,13 +175,27 @@ def test_a_huge_number_of_matches_is_capped(book):
 
 
 def test_contacts_exposes_lookup_only():
-    """No write path, and nothing that sends — this tool only ever answers
-    'what number does this name have'."""
+    """Nothing may edit the address book, and nothing may send.
+
+    This used to assert `find_contact` was the only tool with "contact" in its
+    name, which was a proxy for the real rule. `contact_brief` broke the proxy
+    without breaking the rule: it reads Contacts and Messages and writes a page
+    in the user's own vault, but it cannot create, change or delete a contact,
+    and it cannot send a message. The assertion now names the rule directly, so
+    the next contact-shaped tool is judged on what it does rather than on
+    whether someone picked a matching name.
+    """
     from ada.tools import specs
 
     names = {spec["name"] for spec in specs()}
     assert "find_contact" in names
-    assert {n for n in names if "contact" in n} == {"find_contact"}
+
+    contact_tools = {n for n in names if "contact" in n}
+    assert contact_tools == {"find_contact", "contact_brief"}
+
+    forbidden = ("create", "add", "update", "edit", "delete", "remove", "send")
+    for name in contact_tools:
+        assert not any(verb in name for verb in forbidden), f"{name} looks like it writes"
 
 
 def test_a_missing_permission_explains_how_to_fix_it(monkeypatch):

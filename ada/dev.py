@@ -73,30 +73,43 @@ def config() -> dict:
 
 
 def repos() -> list[Path]:
-    """Every git repo Ada watches.
+    """Every git repo Ada watches: the ones under `dev.root`, plus `dev.repos`.
 
-    An explicit `dev.repos` list wins. Otherwise the root is walked two levels
-    deep, which is exactly the shape of `~/IdeaProjects/<domain>/<project>`
-    while still finding a repo placed directly at the root.
+    The root is walked two levels deep, which is exactly the shape of
+    `~/IdeaProjects/<domain>/<project>` while still finding a repo placed
+    directly at the root.
+
+    `dev.repos` **adds** to that rather than replacing it, because the real case
+    is "everything in my projects folder, and this one other thing on the
+    Desktop". Replacing would mean re-listing four paths to add a fifth, and
+    the list would then silently rot every time a project moved. Set `root` to
+    an empty string to turn discovery off and use the list alone.
     """
     cfg = config()
-    if cfg["repos"]:
-        return [Path(p).expanduser() for p in cfg["repos"]]
+    found: list[Path] = []
 
-    root = Path(cfg["root"]).expanduser()
-    if not root.is_dir():
-        return []
-    found = []
-    for child in sorted(root.iterdir()):
-        if not child.is_dir() or child.name.startswith("."):
-            continue
-        if (child / ".git").exists():
-            found.append(child)
-            continue
-        for grandchild in sorted(child.iterdir()):
-            if grandchild.is_dir() and (grandchild / ".git").exists():
-                found.append(grandchild)
-    return found
+    root_value = cfg["root"]
+    root = Path(root_value).expanduser() if root_value else None
+    if root and root.is_dir():
+        for child in sorted(root.iterdir()):
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            if (child / ".git").exists():
+                found.append(child)
+                continue
+            for grandchild in sorted(child.iterdir()):
+                if grandchild.is_dir() and (grandchild / ".git").exists():
+                    found.append(grandchild)
+
+    for extra in cfg["repos"]:
+        found.append(Path(extra).expanduser())
+
+    # Dedupe by resolved path: a configured repo that also lives under the root
+    # should be watched once, not twice.
+    seen: dict[Path, Path] = {}
+    for path in found:
+        seen.setdefault(path.resolve(), path)
+    return list(seen.values())
 
 
 def git_state(path: Path) -> dict:

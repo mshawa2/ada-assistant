@@ -74,9 +74,9 @@ def _repo_names() -> str:
     description=(
         "Where every project the user works on currently stands: branch, uncommitted "
         "and unpushed work, the latest CI result, and PAUL's plan/apply/unify position.\n\n"
-        "Use this for 'what's the state of my projects', 'anything broken', 'what was I "
-        "in the middle of', or as the development half of a morning briefing. It only "
-        "reads — nothing here changes a repo.\n\n"
+        "Use for questions about project status, broken builds, or unfinished work, and as "
+        "the development half of a morning briefing. It only reads — nothing here "
+        "changes a repo.\n\n"
         "Repos with nothing to say are reported as clean, so the lines that do say "
         "something are the ones worth reading out."
     ),

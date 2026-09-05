@@ -48,11 +48,32 @@ def test_repos_walks_two_levels_for_domain_folders(tmp_path, monkeypatch):
     assert [p.name for p in dev.repos()] == ["ada-assistant", "toplevel", "site"]
 
 
-def test_explicit_repo_list_wins_over_discovery(tmp_path, monkeypatch):
+def test_configured_repos_add_to_discovery_rather_than_replacing_it(tmp_path, monkeypatch):
+    """The real case is "my projects folder, plus this one on the Desktop"."""
+    (tmp_path / "root" / "found" / ".git").mkdir(parents=True)
+    extra = tmp_path / "elsewhere" / "extra"
+    extra.mkdir(parents=True)
     monkeypatch.setattr(
-        dev, "config", lambda: {"root": "/nope", "repos": [str(tmp_path / "x")], "graph_dir": "g"}
+        dev, "config", lambda: {"root": str(tmp_path / "root"), "repos": [str(extra)], "graph_dir": "g"}
     )
-    assert [p.name for p in dev.repos()] == ["x"]
+    assert [p.name for p in dev.repos()] == ["found", "extra"]
+
+
+def test_a_configured_repo_under_the_root_is_not_watched_twice(tmp_path, monkeypatch):
+    (tmp_path / "root" / "found" / ".git").mkdir(parents=True)
+    monkeypatch.setattr(
+        dev,
+        "config",
+        lambda: {"root": str(tmp_path / "root"), "repos": [str(tmp_path / "root" / "found")], "graph_dir": "g"},
+    )
+    assert [p.name for p in dev.repos()] == ["found"]
+
+
+def test_empty_root_turns_discovery_off(tmp_path, monkeypatch):
+    extra = tmp_path / "only"
+    extra.mkdir()
+    monkeypatch.setattr(dev, "config", lambda: {"root": "", "repos": [str(extra)], "graph_dir": "g"})
+    assert [p.name for p in dev.repos()] == ["only"]
 
 
 def test_missing_root_yields_no_repos(monkeypatch):
