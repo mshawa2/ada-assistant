@@ -125,6 +125,10 @@ DEFAULTS: dict[str, Any] = {
             # text through Ada; this makes the model able only to propose an
             # answer, with a human still meeting the original wording.
             "resolve_approval": CONFIRM,
+            # Writes a directory into one of the user's repos and reads the
+            # whole tree to do it. Reading repo state is free; changing one is
+            # not, and that line is where every other gate here sits too.
+            "graph_build": CONFIRM,
         },
         # A ceiling on top of confirmation. `confirm` protects against one
         # wrong action; it does nothing about thirty, because the human in the

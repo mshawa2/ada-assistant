@@ -52,7 +52,8 @@
       "compose_email": "confirm",
       "run_shortcut": "confirm",
       "make_purchase": "confirm",
-      "resolve_approval": "confirm"
+      "resolve_approval": "confirm",
+      "graph_build": "confirm"
     },
     "limits": {
       "send_message": {
@@ -126,6 +127,23 @@
       "account_activity": {
         "per_minute": 3,
         "per_hour": 30
+      },
+      "graph_build": {
+        "per_minute": 1,
+        "per_hour": 6,
+        "per_day": 20
+      },
+      "graph_query": {
+        "per_minute": 10,
+        "per_hour": 120
+      },
+      "dev_brief": {
+        "per_minute": 4,
+        "per_hour": 60
+      },
+      "dev_status": {
+        "per_minute": 10,
+        "per_hour": 120
       }
     }
   },
@@ -224,6 +242,12 @@
         "buffer_minutes": 20,
         "mode": "driving",
         "level": "critical"
+      },
+      "ci": {
+        "enabled": true,
+        "interval_seconds": 300,
+        "level": "urgent",
+        "recovery_level": "normal"
       }
     }
   },
@@ -269,5 +293,10 @@
   "tools": {
     "routing": "auto",
     "max": 24
+  },
+  "dev": {
+    "root": "~/IdeaProjects",
+    "repos": [],
+    "graph_dir": "graphify-out"
   }
 }

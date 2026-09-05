@@ -12,6 +12,7 @@ from ada.heartbeat.executor import run_jobs
 from ada.heartbeat.scheduler import run_schedules
 from ada.heartbeat.notices import add_notice
 from ada.heartbeat.positions_check import check_positions
+from ada.heartbeat.ci_check import check_ci
 from ada.heartbeat.sync_check import check_sync
 from ada.heartbeat.state import get_check_state, update_check_state
 from ada.tools.reminders import load_reminders, mark_due_notified, mark_stale_notified
@@ -116,6 +117,10 @@ CHECKS = {
     # Off by default in ada_config.json: it merges into the positions every
     # alert runs on, and that's worth watching once before it runs unattended.
     "sync_portfolio": check_sync,
+    # Fires on build *transitions* only. A red build is permanent state, not an
+    # event — see ci_check.py for why observing it every tick was the wrong
+    # shape, and what sync_check learned about that first.
+    "ci": check_ci,
     # Turns "the meeting is at three" into "leave now", which is the number
     # you actually act on. Quiet unless an event with a real location is close.
     "leave_by": check_leave_by,

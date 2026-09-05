@@ -2,6 +2,7 @@ from ada.tools import (  # noqa: F401  imported for tool-registration side effec
     approvals_tool,
     brief_tool,
     calendar_tool,
+    dev_tools,
     discovery,
     contacts,
     drafts,
