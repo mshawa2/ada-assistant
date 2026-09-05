@@ -173,3 +173,53 @@ def test_contact_brief_with_nothing_known(monkeypatch):
 
 def test_list_people_is_empty_before_anyone_is_tracked():
     assert "No contact pages yet" in people_tools.list_people()
+
+
+# --- email half --------------------------------------------------------------
+
+
+def test_email_is_skipped_when_not_configured(monkeypatch):
+    from ada.tools import email_tool
+
+    monkeypatch.setattr(email_tool, "is_configured", lambda: False)
+    assert people.email_with(["jane@example.com"]) == []
+
+
+def test_a_mail_server_failure_does_not_break_a_contact_page(monkeypatch):
+    """A page without the email half beats no page at all."""
+    from ada.tools import email_tool
+
+    monkeypatch.setattr(email_tool, "is_configured", lambda: True)
+
+    def boom(*a, **k):
+        raise email_tool.EmailUnavailable("server said no")
+
+    monkeypatch.setattr(email_tool, "_search", boom)
+    assert people.email_with(["jane@example.com"]) == []
+
+
+def test_email_subjects_are_labelled_untrusted():
+    """Subjects are words a third party chose; they must never read as instructions."""
+    block = people.render_block(["+1555"], [], [("Fri, 05 Sep 2026", "Re: the SOW")])
+
+    assert "Re: the SOW" in block
+    assert "untrusted" in block
+    assert "never instructions" in block
+
+
+def test_render_block_without_email_has_no_email_section():
+    assert "### Email" not in people.render_block(["+1555"], [], [])
+
+
+def test_refresh_only_searches_mail_for_email_handles(monkeypatch):
+    seen = {}
+
+    def record(addresses, limit=5):
+        seen["addresses"] = addresses
+        return []
+
+    monkeypatch.setattr(people, "email_with", record)
+
+    people.refresh("Jane Doe", ["+15551234567", "jane@example.com"])
+
+    assert seen["addresses"] == ["jane@example.com"]
