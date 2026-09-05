@@ -1,7 +1,10 @@
-from ada import store
+from ada import vault
 from ada.tools.registry import tool
 
-_NOTES_DIR = store.DATA_DIR / "notes"
+# Notes are knowledge, so they live in the vault the user opens in Obsidian
+# rather than under data/, which is for operational state. See ada/vault.py for
+# why that line is drawn where it is.
+_NOTES_DIR = vault.VAULT_DIR / "notes"
 
 
 def _safe_note_path(filename: str) -> Path:

@@ -236,3 +236,49 @@ def test_no_repos_does_nothing(monkeypatch, sent_notifications):
     monkeypatch.setattr(dev, "repos", lambda: [])
     ci_check.check_ci({})
     assert sent_notifications == []
+
+
+# --- graph_query routing -----------------------------------------------------
+
+
+def test_graph_query_routes_all_to_the_merged_graph(repo, tmp_path, monkeypatch):
+    """'all' is the only value that crosses from code into the vault."""
+    from ada.tools import dev_tools
+
+    merged = tmp_path / "merged-graph.json"
+    merged.write_text("{}")
+    monkeypatch.setattr(dev, "graphify_bin", lambda: "/bin/echo")
+    monkeypatch.setattr(dev, "merged_graph", lambda: merged)
+
+    out = dev_tools.graph_query("all", "anything", mode="hubs")
+    assert str(merged) in out
+
+
+def test_graph_query_says_so_when_no_merged_graph_exists(repo, monkeypatch):
+    from ada.tools import dev_tools
+
+    monkeypatch.setattr(dev, "graphify_bin", lambda: "/bin/echo")
+    monkeypatch.setattr(dev, "merged_graph", lambda: None)
+
+    assert "No merged graph yet" in dev_tools.graph_query("all", "x")
+
+
+def test_graph_query_rejects_an_unknown_project(repo, monkeypatch):
+    from ada.tools import dev_tools
+
+    monkeypatch.setattr(dev, "graphify_bin", lambda: "/bin/echo")
+    assert "No project matching" in dev_tools.graph_query("nope", "x")
+
+
+def test_graph_query_reports_a_missing_per_repo_graph(repo, monkeypatch):
+    from ada.tools import dev_tools
+
+    monkeypatch.setattr(dev, "graphify_bin", lambda: "/bin/echo")
+    assert "No knowledge graph for instaplan" in dev_tools.graph_query("instaplan", "x")
+
+
+def test_graph_query_without_graphify_installed_is_actionable(repo, monkeypatch):
+    from ada.tools import dev_tools
+
+    monkeypatch.setattr(dev, "graphify_bin", lambda: None)
+    assert "uv tool install graphifyy" in dev_tools.graph_query("all", "x")

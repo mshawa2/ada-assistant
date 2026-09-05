@@ -39,7 +39,7 @@ VAULT_DIR = Path(
 
 # Ordered: this is also the order `ensure()` creates them and the order a
 # briefing walks them, so it reads top-down from "what's happening" to "who".
-SECTIONS = ("daily", "projects", "decisions", "notes", "contacts")
+SECTIONS = ("daily", "projects", "decisions", "notes", "drafts", "contacts")
 
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 _WIKILINK = re.compile(r"\[\[([^\]|#]+)")

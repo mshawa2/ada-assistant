@@ -5,7 +5,7 @@ surfacing — most runs should produce nothing.
 
 import time
 
-from ada import store
+from ada import vault
 from ada.heartbeat.brief_check import check_morning_brief
 from ada.heartbeat.leave_check import check_leave_by
 from ada.heartbeat.executor import run_jobs
@@ -17,7 +17,9 @@ from ada.heartbeat.sync_check import check_sync
 from ada.heartbeat.state import get_check_state, update_check_state
 from ada.tools.reminders import load_reminders, mark_due_notified, mark_stale_notified
 
-_NOTES_DIR = store.DATA_DIR / "notes"
+# Follows notes into the vault. If this stayed pointed at data/notes it would
+# watch a directory nothing writes to any more and quietly never fire.
+_NOTES_DIR = vault.VAULT_DIR / "notes"
 
 
 def check_due_reminders(params: dict) -> None:

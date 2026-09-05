@@ -167,6 +167,9 @@ def dev_status(repo: str) -> str:
         "- 'explain': what one thing is and what it connects to — pass its name\n"
         "- 'affected': what would break if the named thing changed\n"
         "- 'hubs': the most connected parts of the codebase, i.e. where the architecture lives\n\n"
+        "Pass repo='all' to query the merged graph spanning every project *and* the user's "
+        "vault of notes and decisions — that is the one that can connect a decision to the "
+        "code it affects.\n\n"
         "Requires a graph for that project; if none exists, say so and offer graph_build. "
         "This only reads."
     ),
@@ -188,20 +191,31 @@ def dev_status(repo: str) -> str:
     },
 )
 def graph_query(repo: str, query: str, mode: str = "question") -> str:
-    path = _resolve(repo)
-    if path is None:
-        return f"No project matching '{repo}'. Known projects: {_repo_names()}."
-
     binary = dev.graphify_bin()
     if binary is None:
         return "graphify isn't installed. Install it with: uv tool install graphifyy"
 
-    graph = dev.graph_dir(path) / "graph.json"
-    if not graph.is_file():
-        return (
-            f"No knowledge graph for {path.name} yet — nothing to query. "
-            "Build one with graph_build (it takes a while, and it asks first)."
-        )
+    # "all" crosses the boundary between code and knowledge: the merged graph
+    # holds every repo plus the vault, so a decision page and the code it talks
+    # about are reachable from each other.
+    if repo.strip().lower() in {"all", "brain", "merged", "everything"}:
+        graph = dev.merged_graph()
+        if graph is None:
+            return (
+                "No merged graph yet. Build each project's graph with graph_build, "
+                "then merge them with: graphify merge-graphs <each graph.json> "
+                "--out ~/Vault/graphify-out/merged-graph.json"
+            )
+    else:
+        path = _resolve(repo)
+        if path is None:
+            return f"No project matching '{repo}'. Known projects: {_repo_names()}, or 'all'."
+        graph = dev.graph_dir(path) / "graph.json"
+        if not graph.is_file():
+            return (
+                f"No knowledge graph for {path.name} yet — nothing to query. "
+                "Build one with graph_build (it takes a while, and it asks first)."
+            )
 
     build = _MODES.get(mode)
     if build is None:

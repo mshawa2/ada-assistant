@@ -13,6 +13,11 @@ from pathlib import Path
 
 TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="ada-tests-"))
 os.environ["ADA_DATA_DIR"] = str(TEST_DATA_DIR)
+# Same reasoning as ADA_DATA_DIR, and now with teeth: notes and drafts live in
+# the vault, so without this a test that saves a note would write into the
+# user's real ~/Vault — the one they have open in Obsidian.
+TEST_VAULT_DIR = Path(tempfile.mkdtemp(prefix="ada-tests-vault-"))
+os.environ["ADA_VAULT_DIR"] = str(TEST_VAULT_DIR)
 # Only so importing ada.config doesn't sys.exit on a machine without a .env.
 # Nothing here makes a real API call — the model seam is always faked.
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-never-used")
@@ -34,12 +39,13 @@ TEST_NOTIFY_CONFIG = {
 
 @pytest.fixture(autouse=True)
 def clean_data_dir():
-    """Every test starts against an empty data directory."""
-    for child in TEST_DATA_DIR.iterdir():
-        if child.is_dir():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
+    """Every test starts against an empty data directory and an empty vault."""
+    for root in (TEST_DATA_DIR, TEST_VAULT_DIR):
+        for child in root.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
     yield
 
 

@@ -1,10 +1,12 @@
 import re
 import time
 
-from ada import store
+from ada import vault
 from ada.tools.registry import tool
 
-_DRAFTS_DIR = store.DATA_DIR / "drafts"
+# In the vault with notes: a draft is something the user reads and edits, not
+# operational state. See ada/vault.py.
+_DRAFTS_DIR = vault.VAULT_DIR / "drafts"
 
 
 def _slug(text: str) -> str:
