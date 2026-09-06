@@ -13,6 +13,7 @@ from ada.heartbeat.scheduler import run_schedules
 from ada.heartbeat.notices import add_notice
 from ada.heartbeat.positions_check import check_positions
 from ada.heartbeat.ci_check import check_ci
+from ada.heartbeat.news_check import check_holdings_news
 from ada.heartbeat.sync_check import check_sync
 from ada.heartbeat.state import get_check_state, update_check_state
 from ada.tools.reminders import load_reminders, mark_due_notified, mark_stale_notified
@@ -123,6 +124,10 @@ CHECKS = {
     # event — see ci_check.py for why observing it every tick was the wrong
     # shape, and what sync_check learned about that first.
     "ci": check_ci,
+    # Earnings weekly, headlines once a market morning. Both on their own
+    # clocks inside one check because they share a fetch budget; see
+    # news_check.py for why a headline is only ever announced once.
+    "holdings_news": check_holdings_news,
     # Turns "the meeting is at three" into "leave now", which is the number
     # you actually act on. Quiet unless an event with a real location is close.
     "leave_by": check_leave_by,

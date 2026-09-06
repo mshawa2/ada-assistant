@@ -15,7 +15,7 @@ extending the code; update it when a real decision changes.
 
 ## What Ada can do
 
-88 tools. ⚠️ means it always asks before running; ⚠️* means it asks
+91 tools. ⚠️ means it always asks before running; ⚠️* means it asks
 depending on the arguments (a lock, not a lamp). Everything else runs freely.
 
 | Area | Tools |
@@ -37,6 +37,7 @@ depending on the arguments (a lock, not a lamp). Everything else runs freely.
 | Recurring work | `list_schedules`, `manage_schedule`, `schedule_job` |
 | Holdings | `add_position`, `check_price`, `list_positions`, `remove_position`, `review_holding`, `rule_options`, `unguarded_holdings`, `update_position` |
 | Market research | `analyze_ticker`, `market_scan` |
+| Watching the book | `week_ahead`, `holdings_news`, `refresh_earnings` |
 | Brokerage (read-only) | `account_activity`, `connection_status`, `holdings_needing_rules`, `list_accounts`, `sync_portfolio` |
 | Development | `dev_brief`, `dev_status`, `graph_query`, `graph_build` ⚠️ |
 | People | `contact_brief`, `list_people` |

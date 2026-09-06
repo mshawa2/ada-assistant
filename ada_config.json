@@ -144,6 +144,20 @@
       "dev_status": {
         "per_minute": 10,
         "per_hour": 120
+      },
+      "holdings_news": {
+        "per_minute": 2,
+        "per_hour": 12,
+        "per_day": 40
+      },
+      "week_ahead": {
+        "per_minute": 2,
+        "per_hour": 12
+      },
+      "refresh_earnings": {
+        "per_minute": 1,
+        "per_hour": 6,
+        "per_day": 20
       }
     }
   },
@@ -248,6 +262,12 @@
         "interval_seconds": 300,
         "level": "urgent",
         "recovery_level": "normal"
+      },
+      "holdings_news": {
+        "enabled": true,
+        "interval_seconds": 3600,
+        "symbols": 12,
+        "level": "normal"
       }
     }
   },

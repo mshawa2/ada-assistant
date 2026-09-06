@@ -13,6 +13,7 @@ from ada.tools import (  # noqa: F401  imported for tool-registration side effec
     imessage,
     jobs_tool,
     mac,
+    market_watch,
     memory,
     messages,
     notes,
