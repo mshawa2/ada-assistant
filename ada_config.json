@@ -268,6 +268,13 @@
         "interval_seconds": 3600,
         "symbols": 12,
         "level": "normal"
+      },
+      "unguarded": {
+        "enabled": true,
+        "interval_seconds": 21600,
+        "every_seconds": 259200,
+        "cooldown_seconds": 2592000,
+        "level": "normal"
       }
     }
   },

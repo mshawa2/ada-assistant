@@ -13,6 +13,7 @@ from ada.heartbeat.scheduler import run_schedules
 from ada.heartbeat.notices import add_notice
 from ada.heartbeat.positions_check import check_positions
 from ada.heartbeat.ci_check import check_ci
+from ada.heartbeat.guard_check import check_unguarded
 from ada.heartbeat.news_check import check_holdings_news
 from ada.heartbeat.sync_check import check_sync
 from ada.heartbeat.state import get_check_state, update_check_state
@@ -128,6 +129,10 @@ CHECKS = {
     # clocks inside one check because they share a fetch budget; see
     # news_check.py for why a headline is only ever announced once.
     "holdings_news": check_holdings_news,
+    # Asks about one unguarded position at a time, largest first. Listing all
+    # 47 would be a chore, and 47 notices would bury every real alert; see
+    # guard_check.py.
+    "unguarded": check_unguarded,
     # Turns "the meeting is at three" into "leave now", which is the number
     # you actually act on. Quiet unless an event with a real location is close.
     "leave_by": check_leave_by,
