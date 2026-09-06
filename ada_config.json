@@ -275,6 +275,13 @@
         "every_seconds": 259200,
         "cooldown_seconds": 2592000,
         "level": "normal"
+      },
+      "graph": {
+        "enabled": true,
+        "interval_seconds": 900,
+        "every_seconds": 3600,
+        "repos_per_pass": 2,
+        "level": "normal"
       }
     }
   },
