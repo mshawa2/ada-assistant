@@ -40,19 +40,87 @@ class MarketError(Exception):
     """A price couldn't be read. Distinct from 'the price is fine' on purpose."""
 
 
-def _get(url: str) -> dict:
-    request = urllib.request.Request(url, headers=_HEADERS)
+# Retry policy. Yahoo rate-limits by IP and recovers within seconds, so a
+# failed read is usually a moment of bad luck rather than an outage — and a
+# stop that silently goes unchecked because of one 429 is the failure worth
+# avoiding here.
+_ATTEMPTS = 3
+_BACKOFF = (0.6, 1.8)  # seconds before attempts 2 and 3
+_RETRY_CODES = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+# ...and a brake, because the caller is often a loop. `positions_check` quotes
+# every managed position in one pass, on the heartbeat's single thread. If
+# Yahoo is genuinely down, retrying three times for each of fifty symbols turns
+# a five-minute tick into minutes of sleeping, and a reminder due in that
+# window fires late. So once the service has clearly stopped answering, further
+# reads fail fast until the cooldown lapses: one symbol pays the cost of
+# discovering the outage instead of all of them.
+_BREAKER_TRIP = 3  # consecutive transient failures
+_BREAKER_COOLDOWN = 120.0
+
+_breaker = {"failures": 0, "opened_at": 0.0}
+
+
+def _breaker_open() -> bool:
+    if _breaker["failures"] < _BREAKER_TRIP:
+        return False
+    if time.time() - _breaker["opened_at"] > _BREAKER_COOLDOWN:
+        _breaker["failures"] = 0  # cooled off: let the next call try for real
+        return False
+    return True
+
+
+def _note_failure() -> None:
+    _breaker["failures"] += 1
+    if _breaker["failures"] == _BREAKER_TRIP:
+        _breaker["opened_at"] = time.time()
+
+
+def _retry_after(error: urllib.error.HTTPError) -> float | None:
+    """The server's own wait, when it gives one and it's short enough to honour."""
     try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT) as response:
-            return json.loads(response.read())
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            raise MarketError("no such symbol") from e
-        raise MarketError(f"the price service returned {e.code}") from e
-    except (urllib.error.URLError, OSError) as e:
-        raise MarketError(f"couldn't reach the price service ({e})") from e
-    except json.JSONDecodeError as e:
-        raise MarketError("the price service returned something unreadable") from e
+        seconds = float(error.headers.get("Retry-After", ""))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return seconds if 0 < seconds <= 5 else None
+
+
+def _get(url: str) -> dict:
+    if _breaker_open():
+        raise MarketError("the price service is rate-limiting; skipping for now")
+
+    last: MarketError | None = None
+    for attempt in range(_ATTEMPTS):
+        request = urllib.request.Request(url, headers=_HEADERS)
+        wait: float | None = None
+        try:
+            with urllib.request.urlopen(request, timeout=_TIMEOUT) as response:
+                payload = json.loads(response.read())
+            _breaker["failures"] = 0  # a good read clears the record
+            return payload
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                # A symbol that doesn't exist won't start existing. Retrying is
+                # pure delay, and it isn't the service's fault, so it must not
+                # count toward the breaker either.
+                raise MarketError("no such symbol") from e
+            last = MarketError(f"the price service returned {e.code}")
+            if e.code not in _RETRY_CODES:
+                _note_failure()
+                raise last from e
+            wait = _retry_after(e)
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last = MarketError(f"couldn't reach the price service ({e})")
+        except json.JSONDecodeError:
+            # Rate-limit pages often arrive as HTML with a 200. Treated as
+            # transient for exactly that reason: the next read usually parses.
+            last = MarketError("the price service returned something unreadable")
+
+        if attempt < _ATTEMPTS - 1:
+            time.sleep(wait if wait is not None else _BACKOFF[attempt])
+
+    _note_failure()
+    raise last or MarketError("the price service didn't answer")
 
 
 def quote(symbol: str, span: str = "1y") -> dict:
