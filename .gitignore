@@ -18,3 +18,8 @@ venv/
 
 # Generated knowledge graph — rebuilt hourly by the heartbeat, local only
 graphify-out/
+
+# Machine-local: private modules and their settings (see ada/extensions.py)
+ada/private/
+tests/private/
+ada_config.local.json

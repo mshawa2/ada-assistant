@@ -31,7 +31,14 @@ os.environ["ADA_VAULT_DIR"] = str(TEST_VAULT_DIR)
 # *missing* from the environment. Deleting them here would hand them straight
 # back a moment later. An empty string is already present, so dotenv leaves it
 # alone, and every `is_configured()` reads it as falsy.
-for _key in ("IMAP_PASSWORD"):
+#
+# Modules in ada/private/ (see ada/extensions.py) declare theirs, so the rule
+# covers them too. Importing the package runs nothing else of Ada's.
+try:
+    from ada.private import CREDENTIALS as _PRIVATE_CREDENTIALS
+except ImportError:
+    _PRIVATE_CREDENTIALS = ()
+for _key in ("IMAP_PASSWORD", *_PRIVATE_CREDENTIALS):
     os.environ[_key] = ""
 # Only so importing ada.config doesn't sys.exit on a machine without a .env.
 # Nothing here makes a real API call — the model seam is always faked.

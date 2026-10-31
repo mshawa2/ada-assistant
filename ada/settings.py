@@ -38,6 +38,12 @@ _ROOT = Path(__file__).resolve().parent.parent
 # ADA_DATA_DIR exists: trying something out without touching your real setup,
 # and running more than one Ada from one checkout.
 _CONFIG_FILE = Path(os.environ.get("ADA_CONFIG_FILE") or _ROOT / "ada_config.json")
+# Machine-local settings layered over the file above, and gitignored: whatever
+# belongs to this machine and not to the repo, like the settings of a private
+# module in ada/private/ (see `extensions.py`). Derived from the config path,
+# so a relocated config gets its own overlay rather than borrowing this one.
+# Read-only from Ada's side: every write goes to the main file.
+_LOCAL_FILE = _CONFIG_FILE.with_name(f"{_CONFIG_FILE.stem}.local.json")
 _LEGACY_HEARTBEAT = _ROOT / "heartbeat_config.json"
 _LEGACY_SAFETY = _ROOT / "safety_config.json"
 
@@ -258,7 +264,17 @@ def _stamp():
         info = _CONFIG_FILE.stat()
     except OSError:
         return None
-    return (info.st_mtime_ns, info.st_size)
+    try:
+        local = _LOCAL_FILE.stat()
+        local_stamp = (local.st_mtime_ns, local.st_size)
+    except OSError:
+        local_stamp = None
+    return (info.st_mtime_ns, info.st_size, local_stamp)
+
+
+def _load_local() -> dict:
+    raw = store.read_json(_LOCAL_FILE, {})
+    return raw if isinstance(raw, dict) else {}
 
 
 def _migrate_legacy() -> None:
@@ -315,13 +331,13 @@ def save_raw(raw: dict) -> None:
 
 
 def load() -> dict:
-    """The effective settings: defaults <- file <- active mode."""
+    """The effective settings: defaults <- file <- local overlay <- active mode."""
     with _lock:
         stamp = _stamp()
         if stamp is not None and _cache["stamp"] == stamp and _cache["value"] is not None:
             return _cache["value"]
 
-        merged = _deep_merge(DEFAULTS, load_raw())
+        merged = _deep_merge(_deep_merge(DEFAULTS, load_raw()), _load_local())
         merged = _apply_active_mode(merged)
         _cache["stamp"] = _stamp()
         _cache["value"] = merged

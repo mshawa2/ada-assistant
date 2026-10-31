@@ -330,9 +330,7 @@
   },
   "dev": {
     "root": "~/IdeaProjects",
-    "repos": [
-      "~/Desktop/side-project"
-    ],
+    "repos": [],
     "graph_dir": "graphify-out"
   }
 }

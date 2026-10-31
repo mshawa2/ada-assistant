@@ -33,7 +33,7 @@ run, the same bargain `notify.deliver` makes with its channels.
 
 import time
 
-from ada import approvals, location, notify, settings, when
+from ada import approvals, extensions, location, notify, settings, when
 from ada.heartbeat.notices import list_notices
 from ada.tools import calendar_tool, email_tool, reminders, weather
 
@@ -239,7 +239,8 @@ SECTIONS = (
 def compose() -> str:
     """The brief as text. Never raises — a broken section is reported in place."""
     blocks = []
-    for name, section in SECTIONS:
+    extensions.load()
+    for name, section in (*SECTIONS, *extensions.brief_sections):
         try:
             lines = section()
         except Exception as e:

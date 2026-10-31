@@ -1,10 +1,10 @@
 # Ada
 
-**A proactive personal AI agent built on Claude — 91 tools, a background daemon that acts on its own schedule, and layered rails on what it may do unattended.**
+**A proactive personal AI agent built on Claude — 88 tools, a background daemon that acts on its own schedule, and layered rails on what it may do unattended.**
 
 Ada handles reminders, calendar, email, iMessage, notes, web research, smart home and a read-only view of a brokerage account, by text or by voice. What makes it more than a chat wrapper is the engineering underneath: cost-aware tool routing, prompt caching, a job and approval system for unattended work, and a safety model where every gate defaults to "ask first".
 
-![Python](https://img.shields.io/badge/python-3.14-blue) ![Claude](https://img.shields.io/badge/LLM-Claude%20(Anthropic%20SDK)-orange) ![Tests](https://img.shields.io/badge/tests-1%2C228%20passing-brightgreen)
+![Python](https://img.shields.io/badge/python-3.14-blue) ![Claude](https://img.shields.io/badge/LLM-Claude%20(Anthropic%20SDK)-orange) ![Tests](https://img.shields.io/badge/tests-1%2C205%20passing-brightgreen)
 
 ![Ada's dashboard: a background job waiting for approval to send a text, the job queue, holdings with stops, model spend against a daily budget, and recurring schedules](docs/dashboard.png)
 <sub>The local dashboard, running on demo data (`python demo.py`). A background job has parked a text message for human approval.</sub>
@@ -15,9 +15,9 @@ Ada handles reminders, calendar, email, iMessage, notes, web research, smart hom
 
 | | |
 |---|---|
-| **Tools** | 91, across 20+ domains (calendar, email, messages, home, market data, memory, jobs…) |
+| **Tools** | 88, across 20+ domains (calendar, email, messages, home, market data, memory, jobs…) |
 | **Codebase** | ~18K lines of Python, plus ~13.6K lines of tests |
-| **Tests** | 1,228 passing in ~6s, no network required |
+| **Tests** | 1,205 passing in ~6s, no network required |
 | **Token savings** | Tool routing cuts ~60% of per-call prompt overhead (~4–5K tokens); prompt caching bills the stable prefix at 10% on repeat calls |
 | **Interfaces** | Text REPL, push-to-talk voice, open-mic wake word, local web dashboard |
 | **Runs as** | A macOS LaunchAgent that starts at login and restarts on failure |
@@ -50,7 +50,7 @@ flowchart LR
     T & V --> Core
     F --> A
     R --> L --> Claude[(Claude API)]
-    L --> G --> Tools[91 tools]
+    L --> G --> Tools[88 tools]
     S --> J --> Core
     J -- consequential action --> A
     C --> N[Notifications<br/>macOS · ntfy push]
@@ -128,7 +128,7 @@ cp .env.example .env              # add ANTHROPIC_API_KEY at minimum
 ./.venv/bin/python voice_main.py  # push-to-talk voice (needs Deepgram + ElevenLabs keys)
 ./.venv/bin/python heartbeat_main.py   # daemon + dashboard at http://127.0.0.1:4173
 
-./.venv/bin/python -m pytest      # 1,228 tests, no network or API key needed
+./.venv/bin/python -m pytest      # 1,205 tests, no network or API key needed
 ```
 
 Every integration beyond the Claude key is optional and degrades cleanly: without a search key, web search falls back to Wikipedia; without Home Assistant, smart home runs through Apple Shortcuts. Behaviour, limits and autonomy are configured in [`ada_config.json`](ada_config.json). See [`HOSTING.md`](HOSTING.md) for always-on hosting and [`SMART_HOME.md`](SMART_HOME.md) for the home plan.
@@ -147,9 +147,10 @@ ada/
   recap.py  session.py  store.py                memory and context
   debate.py  analyst.py                         multi-agent review
   heartbeat/      daemon loop, scheduler, executor, proactive checks
-  tools/          the 91 tools, one module per domain
+  tools/          the 88 tools, one module per domain
   face/           local dashboard (Flask + static UI)
-tests/            1,228 tests, all against fakes
+  extensions.py   loads optional machine-local modules from ada/private/ (gitignored)
+tests/            1,205 tests, all against fakes
 launchd/          LaunchAgent definition
 ```
 

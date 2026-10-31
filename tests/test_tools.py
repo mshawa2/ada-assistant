@@ -140,7 +140,13 @@ def _table_entries() -> dict[str, str | None]:
 
 def test_the_capability_table_lists_every_tool_exactly_once():
     listed = set(_table_entries())
-    registered = {spec["name"] for spec in tool_specs()}
+    # A private module's tools (ada/extensions.py) are this machine's business,
+    # not the public table's.
+    registered = {
+        spec["name"]
+        for spec in tool_specs()
+        if not get_tool(spec["name"]).func.__module__.startswith("ada.private.")
+    }
 
     assert not registered - listed, f"registered but missing from AGENT.md: {sorted(registered - listed)}"
     assert not listed - registered, f"in AGENT.md but not registered: {sorted(listed - registered)}"

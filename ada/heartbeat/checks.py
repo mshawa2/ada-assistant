@@ -5,7 +5,7 @@ surfacing — most runs should produce nothing.
 
 import time
 
-from ada import vault
+from ada import extensions, vault
 from ada.heartbeat.brief_check import check_morning_brief
 from ada.heartbeat.leave_check import check_leave_by
 from ada.heartbeat.executor import run_jobs
@@ -145,3 +145,7 @@ CHECKS = {
     # model call for is one you'd think twice about scheduling daily.
     "morning_brief": check_morning_brief,
 }
+
+# Checks from ada/private/, if this machine has any. See ada/extensions.py.
+extensions.load()
+CHECKS.update(extensions.checks)
