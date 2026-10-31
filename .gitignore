@@ -15,3 +15,6 @@ venv/
 .idea/
 .vscode/
 .DS_Store
+
+# Generated knowledge graph — rebuilt hourly by the heartbeat, local only
+graphify-out/
