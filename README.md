@@ -6,6 +6,9 @@ Ada handles reminders, calendar, email, iMessage, notes, web research, smart hom
 
 ![Python](https://img.shields.io/badge/python-3.14-blue) ![Claude](https://img.shields.io/badge/LLM-Claude%20(Anthropic%20SDK)-orange) ![Tests](https://img.shields.io/badge/tests-1%2C228%20passing-brightgreen)
 
+![Ada's dashboard: a background job waiting for approval to send a text, the job queue, holdings with stops, model spend against a daily budget, and recurring schedules](docs/dashboard.png)
+<sub>The local dashboard, running on demo data (`python demo.py`). A background job has parked a text message for human approval.</sub>
+
 ---
 
 ## At a glance
@@ -117,6 +120,8 @@ Requires macOS (Calendar, Contacts and iMessage use native frameworks). Develope
 ```bash
 python3 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt
+./.venv/bin/python demo.py        # dashboard on made-up data, no keys needed: http://127.0.0.1:4174
+
 cp .env.example .env              # add ANTHROPIC_API_KEY at minimum
 
 ./.venv/bin/python main.py        # text REPL
